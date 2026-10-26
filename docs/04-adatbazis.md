@@ -302,21 +302,27 @@ COMMIT;
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     __table_args__ = (
-        Index("ix_chunks_embedding_hnsw", "embedding",
-              postgresql_using="hnsw",
-              postgresql_with={"m": 16, "ef_construction": 64},
-              postgresql_ops={"embedding": "vector_cosine_ops"}),
+        Index(
+            "ix_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
         Index("ix_chunks_tsv", "tsv", postgresql_using="gin"),
         {"schema": "app"},
     )
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app.documents.id", ondelete="CASCADE"))
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app.documents.id", ondelete="CASCADE")
+    )
     chunk_index: Mapped[int]
     content: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(1024))
     embedding_model: Mapped[str]
     tsv: Mapped[str] = mapped_column(
-        TSVECTOR, Computed("to_tsvector('hungarian', content)", persisted=True))
+        TSVECTOR, Computed("to_tsvector('hungarian', content)", persisted=True)
+    )
 ```
 
 ### Hibrid keresés (RRF)

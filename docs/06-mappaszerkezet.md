@@ -21,6 +21,8 @@ finql/
 ├── uv.lock
 ├── .env.example                   # minden env-változó, dummy értékekkel
 ├── .gitignore
+├── .gitattributes                 # LF sorvégek minden platformon
+├── .python-version                # 3.12 (uv ebből telepít)
 ├── .pre-commit-config.yaml
 ├── Dockerfile                     # többlépcsős build, nem-root user
 ├── docker-compose.yml             # db (pgvector/pgvector:pg18), api, (ui)
@@ -28,7 +30,7 @@ finql/
 │
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml                 # lint → mypy → pytest (Postgres service)
+│       ├── ci.yml                 # lint → formázás → mypy → pytest (testcontainers)
 │       └── eval.yml               # kézi vagy éjszakai eval valódi LLM-mel (secret)
 │
 ├── docs/                          # ez a dokumentáció
@@ -54,6 +56,7 @@ finql/
 ├── src/finql/
 │   ├── __init__.py
 │   ├── main.py                    # FastAPI app factory, lifespan (pool-ok, katalógus-cache)
+│   ├── health.py                  # /health (liveness), /ready (DB-ping, 503 ha nem elérhető)
 │   ├── cli.py                     # typer: seed, ingest, eval, create-user
 │   │
 │   ├── core/                      # közös infrastruktúra, nincs benne üzleti logika

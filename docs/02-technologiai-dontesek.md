@@ -67,7 +67,8 @@ egy FastAPI-szolgáltatásba, ha a terhelés vagy a streaming indokolja.
 
 ### ADR-001: FastAPI (nem Django)
 
-**Döntés:** FastAPI + SQLAlchemy 2.0 (async) + Alembic + psycopg 3.
+**Döntés:** FastAPI + SQLAlchemy 2.0 (async) + Alembic. Adatbázis-driver: **asyncpg** az async
+alkalmazáskódhoz, **psycopg 3** (szinkron) az eszközökhöz (Alembic, `COPY`-alapú seed).
 
 **Indoklás:**
 - A termék magja az LLM-integráció: hosszú, I/O-kötött hívások és streamelt válasz (SSE). A natív async itt valódi előny.
@@ -78,6 +79,11 @@ egy FastAPI-szolgáltatásba, ha a terhelés vagy a streaming indokolja.
 **Amit feladunk és hogyan pótoljuk:**
 - Beépített admin → `sqladmin`, ha kell (opcionális).
 - Beépített auth → saját JWT + Argon2. Kis munka, és jól mutatja, hogy értjük.
+
+**Módosítás (2026-10-26, 0. fázis):** az eredeti terv a psycopg 3 async módja volt. Windows-on
+viszont ez nem fut az alapértelmezett `ProactorEventLoop`-pal, ehhez minden belépési pontra
+(uvicorn, TestClient, pytest) külön hurokbeállítás kellene. Az asyncpg minden platformon működik
+és gyorsabb is. A szinkron psycopg-t ez nem érinti.
 
 **Mikor gondolnánk újra:** ha a back-office CRUD képernyők válnának dominánssá.
 Ugyanez az architektúra Django + Django Ninja + `pgvector` Django-integrációval is
@@ -131,7 +137,7 @@ végzi. Egy kevesebb rendszer, amit üzemeltetni kell.
 | Konfiguráció | **pydantic-settings** | `.env` + típusos beállítások |
 | Feladatfuttató | **poethepoet** (`uv run poe test`) | Windows-on is megy, nem kell `make` |
 | Konténer | Docker Compose (`pgvector/pgvector:pg18`) | |
-| CI | GitHub Actions | lint → típus → teszt (Postgres service) |
+| CI | GitHub Actions | lint → formázás → típus → teszt (a Postgrest a testcontainers indítja) |
 
 ---
 
@@ -139,7 +145,7 @@ végzi. Egy kevesebb rendszer, amit üzemeltetni kell.
 
 | ADR | Döntés | Státusz |
 |---|---|---|
-| 001 | FastAPI + SQLAlchemy 2.0 async + Alembic | Elfogadva |
+| 001 | FastAPI + SQLAlchemy 2.0 async + Alembic; asyncpg (app) + psycopg (eszközök) | Elfogadva, módosítva |
 | 002 | Hibrid séma: `bank`/`analytics` DB-first, `app` code-first, mindent Alembic futtat | Elfogadva |
 | 003 | PostgreSQL 18 + pgvector, nincs külön vektor-DB | Elfogadva |
 | 004 | Provider-független LLM- és embedding-interfész, Claude az alapértelmezett | Elfogadva |

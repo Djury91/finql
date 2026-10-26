@@ -20,16 +20,20 @@ Minden fázis végén működő, tesztelt, `main`-be mergelt állapot van. Az id
 
 **Cél:** üres, de professzionális váz, zöld CI-jal.
 
-- [ ] `git init`, GitHub-repó létrehozása (`finql`), MIT-licenc
-- [ ] `uv init --package`, Python 3.12, `src/finql` layout
-- [ ] Függőségek: `fastapi`, `uvicorn`, `sqlalchemy[asyncio]`, `psycopg[binary]`, `alembic`, `pydantic-settings`, `structlog`, `typer`; dev: `ruff`, `mypy`, `pytest`, `pytest-asyncio`, `testcontainers`, `pre-commit`, `poethepoet`
-- [ ] `docker-compose.yml` a `pgvector/pgvector:pg18` image-dzsel, healthcheckkel és volume-mal
-- [ ] `.env.example`, `core/config.py`
-- [ ] `/health` és `/ready` végpont (a `/ready` a DB-t is pingeli), első teszt
-- [ ] `pre-commit`: ruff, ruff-format, mypy, trailing whitespace
-- [ ] GitHub Actions: `ci.yml` (lint, mypy, pytest Postgres service-szel)
+- [x] `git init`, GitHub-repó létrehozása (`finql`), MIT-licenc
+- [x] uv-projekt, Python 3.12, `src/finql` layout, `finql` CLI-belépési pont
+- [x] Függőségek: `fastapi`, `uvicorn`, `sqlalchemy[asyncio]`, `asyncpg`, `pydantic-settings`, `typer`; dev: `ruff`, `mypy`, `pytest`, `pytest-asyncio`, `httpx2`, `testcontainers`, `pre-commit`, `poethepoet`. (Az `alembic`, a `psycopg` és a `structlog` akkor kerül be, amikor használjuk: 1. és 2. fázis.)
+- [x] `docker-compose.yml` a `pgvector/pgvector:pg18` image-dzsel, healthcheckkel és volume-mal
+- [x] `.env.example`, `core/config.py`
+- [x] `/health` és `/ready` végpont (a `/ready` a DB-t is pingeli), unit- és integrációs teszt
+- [x] `pre-commit`: ruff, ruff-format, mypy, alap-hookok, valamint egy őr, amely nem engedi commitolni a `private/` mappát
+- [x] GitHub Actions: `ci.yml` (lint, formázás, mypy, pytest testcontainersszel)
 
-**Kész, ha:** `docker compose up -d db && uv run poe test` lokálisan és a CI-ban is zöld.
+**Kész, ha:** `uv run poe check` lokálisan és a CI-ban is zöld.
+
+**Tanulságok (Windows):** a psycopg async módja nem fut a `ProactorEventLoop`-pal (→ asyncpg, ADR-001).
+A `localhost` IPv6-ra oldódik fel, és ~2 s késést okoz (→ `127.0.0.1` a DSN-ben). A testcontainers
+Ryuk-konténere Docker Desktopon nem indul el időben (→ Windows-on kikapcsolva, a CI-ban bekapcsolva).
 
 ---
 

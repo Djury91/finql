@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Függőségek
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Formázás
+        run: uv run ruff format --check .
+
+      - name: Típusellenőrzés
+        run: uv run mypy
+
+      # Az integrációs tesztek testcontainersszel indítanak Postgrest (pgvector/pgvector:pg18).
+      - name: Tesztek
+        run: uv run pytest

@@ -107,15 +107,23 @@ flowchart LR
     end
     subgraph Lekérdezés
         Q[Kérdés] --> QE[Kérdés-embedding]
-        QE --> HY[Hibrid keresés<br/>vektor + full-text, RRF]
-        HY --> ACL[Jogosultsági szűrés<br/>min_role]
-        ACL --> GEN[LLM-válasz<br/>forrásmegjelöléssel]
+        QE --> VEC[Vektoros keresés<br/>olvasási szint a WHERE-ben]
+        Q --> FTS[Magyar full-text keresés<br/>olvasási szint a WHERE-ben]
+        VEC --> RRF[Fúzió: RRF]
+        FTS --> RRF
+        RRF --> GEN[LLM-válasz<br/>forrásmegjelöléssel]
+        GEN --> CHK{van érvényes<br/>hivatkozás?}
+        CHK -->|igen| ANS[Válasz + források]
+        CHK -->|nem| SRC[Csak a források]
     end
 ```
 
-- **Inkrementális frissítés:** a dokumentum SHA-256 hash-e alapján csak a változott dokumentumokat dolgozzuk fel újra. A törölt forrásfájlok chunkjai is törlődnek.
-- **Hibrid keresés:** a vektoros keresés a jelentést, a `tsvector` (magyar szótárral) a pontos kifejezéseket (díjtételek, termékkódok) találja meg. A kettőt Reciprocal Rank Fusion egyesíti.
-- **Jogosultság:** a dokumentumnak van `min_role` szintje. A szűrés az SQL-ben történik, nem az LLM-re bízzuk.
+- **Források:** 20 szintetikus Markdown-dokumentum YAML-fejléccel (`data/documents/`): díjjegyzékek, kamathirdetmény, termékfeltételek, szabályzatok, fogalomtár. A számok a szintetikus banki adatokhoz igazodnak.
+- **Inkrementális frissítés:** a dokumentum SHA-256 hash-e (LF sorvégekkel, hogy Windows-on és Linuxon ugyanaz legyen) alapján csak a változott dokumentumokat dolgozzuk fel újra, egy tranzakcióban. Embeddingmodell-váltáskor is újra feldolgozzuk őket. A törölt forrásfájlok részletei is törlődnek.
+- **Darabolás:** címsorok mentén, egy részlet nem lépi át a címsort; ~500 token felett bekezdés, sor, mondat szerint vágunk, kis átfedéssel (`rag/chunking.py`).
+- **Hibrid keresés:** a vektoros keresés a jelentést, a `tsvector` (magyar szótárral) a pontos kifejezéseket (díjtételek, termékkódok) találja meg. A kettőt Reciprocal Rank Fusion egyesíti. Embedding nélkül a keresés csak szöveges, de működik (ADR-008).
+- **Jogosultság:** a dokumentumnak olvasási szintje van (`general`, `internal`), a szerepkörhöz kódban rögzített szint tartozik (a fiókvezető csak az általánosakat olvassa). A szűrés az SQL-ben történik, nem az LLM-re bízzuk.
+- **Csak idézett válasz:** a modell minden állítás mögé forrásszámot tesz; a kód ellenőrzi őket, és hivatkozás nélküli választ nem mutat meg. Minden válasz az append-only `answer_log`-ba kerül, és a napi tokenkeretbe számít.
 
 ## 4. Agent-folyamat (6. fázis)
 
@@ -124,7 +132,7 @@ Az agent egy eszközhívási ciklus (tool-use loop). Az LLM eldönti, melyik esz
 | Eszköz | Mit csinál | Jogosultság |
 |---|---|---|
 | `query_database(question)` | A teljes text-to-SQL folyamatot futtatja | A felhasználó kontextusával (RLS) |
-| `search_documents(query, top_k)` | Hibrid keresés a dokumentumokban | `min_role` szűrés |
+| `search_documents(query, top_k)` | Hibrid keresés a dokumentumokban | Olvasási szint a szerepkörből, SQL-ben szűrve |
 | `describe_schema(view?)` | Visszaadja a nézetek és oszlopok leírását | Csak `analytics` |
 | `get_metric_definition(name)` | Üzleti fogalom definíciója (pl. „aktív ügyfél”) | – |
 
@@ -143,6 +151,7 @@ Szabályok:
 | `GET` | `/api/v1/query/history` | Saját korábbi lekérdezések | 3 |
 | `GET` | `/api/v1/schema` | Az LLM által látott séma (átláthatóság) | 3 |
 | `POST` | `/api/v1/documents/search` | Dokumentumkeresés | 5 |
+| `POST` | `/api/v1/documents/answer` | Válasz a dokumentumokból, forrásmegjelöléssel | 5 |
 | `POST` | `/api/v1/chat/conversations` | Új beszélgetés | 6 |
 | `POST` | `/api/v1/chat/conversations/{id}/messages` | Üzenet az agentnek (SSE stream) | 6 |
 | `GET` | `/api/v1/audit/queries` | Lekérdezésnapló (auditor) | 3 |

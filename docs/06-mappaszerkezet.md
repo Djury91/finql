@@ -91,7 +91,6 @@ finql/
 │   │   ├── usage.py               # token- és költségnaplózás, felhasználói keret
 │   │   └── prompts/               # verziózott promptok (.md / .j2)
 │   │       ├── text_to_sql.v1.md
-│   │       ├── answer_summary.v1.md
 │   │       └── rag_answer.v1.md
 │   │
 │   ├── text_to_sql/
@@ -108,11 +107,14 @@ finql/
 │   │   └── schemas.py
 │   │
 │   ├── rag/
-│   │   ├── router.py              # POST /documents/search
-│   │   ├── service.py
-│   │   ├── models.py              # Document, DocumentChunk
-│   │   ├── chunking.py
-│   │   ├── retriever.py           # hibrid keresés (RRF)
+│   │   ├── router.py              # POST /documents/search, POST /documents/answer
+│   │   ├── sources.py             # a forrásfájlok: YAML-fejléc, tartalom-hash
+│   │   ├── chunking.py            # címsor-alapú darabolás, átfedéssel
+│   │   ├── ingest.py              # `finql ingest`: hash-alapú inkrementális betöltés
+│   │   ├── retriever.py           # hibrid keresés (vektor + full-text, RRF), olvasási szint SQL-ben
+│   │   ├── answer.py              # idézett válasz: források a promptban, hivatkozás-ellenőrzés, napló
+│   │   ├── demo.py                # kulcs nélküli mód: a legjobb forrás eleje, idézve
+│   │   ├── models.py              # Document, DocumentChunk, AnswerLog; szerepkör → olvasási szint
 │   │   └── schemas.py
 │   │
 │   ├── agent/
@@ -130,6 +132,7 @@ finql/
 │   │   ├── report.py              # markdown-riport és két futás összevetése
 │   │   ├── store.py               # eval_runs / eval_results
 │   │   ├── oracle.py              # ál-LLM az elvárt SQL-lel: a harness önellenőrzése
+│   │   ├── retrieval.py           # dokumentumkeresés: recall@5, MRR, szivárgás (`finql eval retrieval`)
 │   │   ├── models.py              # EvalRun, EvalResult
 │   │   └── run.py                 # a CLI-parancsok összekötése (beállítások → futás → riport)
 │   │
@@ -140,27 +143,26 @@ finql/
 │   │   └── schemas.py
 │   │
 │   └── pipelines/                 # adat-pipeline-ok, a CLI-ből indítva
-│       ├── seed/
-│       │   ├── generator.py       # Faker hu_HU, eloszlások, „történetek”
-│       │   ├── reference.py       # fiókok, termékek, kereskedőkategóriák, ünnepnapok
-│       │   ├── identifiers.py     # IBAN, adóazonosító jel, adószám (érvényes ellenőrzőszámmal)
-│       │   ├── loader.py          # COPY, partíciók, indexek a betöltés után, VACUUM ANALYZE
-│       │   └── scales.py          # tiny / small / large
-│       └── ingest/
-│           ├── loaders.py         # markdown, pdf
-│           └── run.py             # hash-alapú inkrementális betöltés
+│       └── seed/
+│           ├── generator.py       # Faker hu_HU, eloszlások, „történetek”
+│           ├── reference.py       # fiókok, termékek, kereskedőkategóriák, ünnepnapok
+│           ├── identifiers.py     # IBAN, adóazonosító jel, adószám (érvényes ellenőrzőszámmal)
+│           ├── loader.py          # COPY, partíciók, indexek a betöltés után, VACUUM ANALYZE
+│           └── scales.py          # tiny / small / large
 │
 ├── data/
 │   ├── sql_examples.yaml          # few-shot példák (kérdés + SQL), `finql examples sync`
-│   └── documents/                 # szintetikus banki szabályzatok (md), a RAG forrása
-│       ├── hitelezesi-szabalyzat.md
-│       ├── dijjegyzek-2026.md
-│       └── kartyahasznalati-feltetelek.md
+│   └── documents/                 # 20 szintetikus banki dokumentum (md + YAML-fejléc), `finql ingest`
+│       ├── README.md              # a fejléc formátuma (nem töltődik be)
+│       ├── hirdetmeny-kamatok.md
+│       ├── kovetelkezelesi-szabalyzat.md
+│       └── …
 │
 ├── eval/                          # adat: a kód a src/finql/eval csomagban (a CLI-ből importálható)
 │   ├── datasets/
 │   │   ├── golden.yaml            # 50 kérdés: elvárt SQL, nehézség, címkék, szerepkör
-│   │   └── adversarial.yaml       # 20 elutasítandó kérdés, kategóriánként
+│   │   ├── adversarial.yaml       # 20 elutasítandó kérdés, kategóriánként
+│   │   └── retrieval.yaml         # 20 dokumentumkeresési kérdés: elvárt dokumentum, szerepkör
 │   └── reports/                   # generált markdown-riportok (gitignore, kivéve a kiemelteket)
 │
 └── tests/
@@ -177,7 +179,7 @@ finql/
         ├── test_query_api.py
         ├── test_examples.py       # few-shot: sync, kiválasztás, prompt és napló
         ├── test_eval.py           # orákulum: 100%; szkriptelt válaszok bírálata
-        └── test_hybrid_search.py
+        └── test_rag.py            # betöltés, hibrid keresés, olvasási szint, idézett válasz, napló
 ```
 
 ## Konvenciók

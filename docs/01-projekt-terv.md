@@ -33,8 +33,8 @@ napokat. A FinQL-lel maguk kérdezhetnek, de csak a jogosultságuknak megfelelő
 |---|---|---|
 | `branch_manager` | Fiókvezető | Csak a saját fiókja ügyfelei, számlái, tranzakciói. Dokumentumok: általános. |
 | `analyst` | Központi elemző | Minden fiók adata, PII nélkül. Dokumentumok: általános + belső. |
-| `auditor` | Belső ellenőr | A `query_log` és a beszélgetések olvasása. Banki adatot nem kérdez. |
-| `admin` | Rendszergazda | Felhasználók, dokumentumok, few-shot példák kezelése. |
+| `auditor` | Belső ellenőr | A `query_log` és a beszélgetések olvasása. Banki adatot nem kérdez. Dokumentumok: általános + belső. |
+| `admin` | Rendszergazda | Felhasználók, dokumentumok, few-shot példák kezelése. Dokumentumok: általános + belső. |
 
 ### Méretezés (mekkora rendszert tervezünk?)
 

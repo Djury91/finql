@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     embedding_model: str = "voyage-4"
     embedding_timeout_seconds: float = Field(default=10, gt=0)
 
+    # --- Documents (RAG) ---
+    # Sources in the prompt of a document answer. More finds more, but costs input tokens and
+    # gives the model more to get wrong.
+    rag_top_k: int = Field(default=5, ge=1, le=20)
+
     @property
     def json_logs(self) -> bool:
         return self.log_json if self.log_json is not None else self.env != "dev"

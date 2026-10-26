@@ -193,6 +193,45 @@ a válasz kiszivárgását mérnénk.
 **Orákulum:** egy ál-LLM, amely az elvárt SQL-t adja vissza. Vele a harness (kérdéssorok,
 hatókörök, összevetés, tárolás, riport) API-kulcs és költség nélkül tesztelhető: 100%-ot kell adnia.
 
+### ADR-008: Dokumentumok – olvasási szint az SQL-ben, hibrid keresés, csak idézett válasz
+
+**Olvasási szint, nem szerepkör-rang:** a terv eredetileg `min_role`-t írt a dokumentumra, a
+szerepkörök azonban nem egy létra. Az auditor nem lát banki adatot, mégis minden szabályzatot
+olvas; az elemző a belső szabályzatokat is látja, a fiókvezető nem. A dokumentum ezért
+olvasási szintet kap (`general`, `internal`; a Postgres-enum sorrendje adja a `<=`-t), a
+szerepkörhöz pedig egy kódban rögzített leképezés rendel szintet (`rag.models.ROLE_ACCESS`).
+A szűrés mindkét keresési ág `WHERE`-jében van: a szint fölötti részlet ki sem jön az
+adatbázisból, így az LLM-hez és a válaszba sem kerülhet.
+
+**Hibrid keresés, a fúzió Pythonban:** a vektoros ág a jelentést találja meg („mennyibe kerül” ~
+„díja”), a magyar szótáras `tsvector` a pontos kifejezéseket (összegek, terméknevek). A két
+jelöltlistát (40–40 találat) Reciprocal Rank Fusion egyesíti (k = 60): csak a helyezés számít,
+így a koszinusztávolság és a `ts_rank` közös skála nélkül összevethető. A fúzió Pythonban fut,
+nem egy nagy SQL-ben: egységtesztelhető, és ha az embedding nem érhető el, a keresés
+ugyanazzal a kóddal csak a szöveges ágon megy tovább (`mode: "text"`), nem áll le. A szöveges ág
+`OR`-ral köti a szavakat: a `plainto_tsquery` `AND`-je egy nyolcszavas kérdésre csak a mind a
+nyolc szót tartalmazó részletet találná meg. A rangsort a `ts_rank_cd` adja, a címsorban talált
+szó többet ér.
+
+**Darabolás címsorok mentén:** egy részlet sosem lépi át a címsort, mert a hivatkozás egy
+szakaszra mutat, és két témát keverő részlet mindkettőre rosszul illeszkedik. A túl hosszú
+szakasz bekezdés, sor, mondat és végső esetben szó szerint vágódik, a táblázat fejléce minden
+darabban megmarad, és kis átfedés van (az előző darab utolsó mondatai). Az embeddingbe a
+dokumentum címe és a szakasz is bekerül, így a személyi kölcsön „Késedelem” szakasza a
+személyi kölcsönről szól.
+
+**Csak idézett válasz:** a források `<source id="n">` címkékben kerülnek a felhasználói
+üzenetbe (a rendszerprompt így cache-elhető), és a forrás saját szövegében lévő záró címkét a
+kód széttöri. A modell a válasz minden állítása mögé forrásszámot tesz. A kód ellenőrzi a
+számokat: a nem létezőket elhagyja, és ha egy „megválaszolt” kérdésnél nem marad érvényes
+hivatkozás, a választ nem mutatja meg (`uncited`), csak a találatokat. Banki szabályzatnál az
+ellenőrizhetetlen válasz rosszabb a semminél.
+
+**Napló:** minden válasz az `answer_log`-ba kerül. A tábla csak hozzáfűzhető, mint a
+`query_log`, és a napi tokenkeret mindkettőből számol. A források `fájl@verzió#részlet` alakban
+szerepelnek (pl. `hirdetmeny-kamatok.md@2#3`), nem részletazonosítóval: egy újratöltés új
+részleteket ír, a verzió viszont megmondja, melyik szövegre épült a válasz.
+
 ### ADR-005: Fejlesztői eszközök
 
 | Terület | Választás | Miért |
@@ -222,5 +261,6 @@ hatókörök, összevetés, tárolás, riport) API-kulcs és költség nélkül 
 | 005 | uv, ruff, mypy, pytest + testcontainers, sqlglot, typer | Elfogadva |
 | 006 | Költségőr: a becsült köztes sorszám a fő mérce, a költség csak hátvéd | Elfogadva (mérés alapján) |
 | 007 | Eval végrehajtási pontossággal, az API folyamatán; few-shot a felhasználói üzenetben | Elfogadva |
+| 008 | Dokumentumok: olvasási szint az SQL-ben, hibrid keresés RRF-fel, csak idézett válasz | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

@@ -1,0 +1,97 @@
+# A dokumentumkeresés mini-evalja (finql eval retrieval).
+#
+# - expected: a dokumentum(ok), amelyek bármelyikének az első top_k (5) találat között kell lennie.
+#   A recall@k és az MRR ezekből számol.
+# - role: a kérdező szerepköre; a fiókvezető (branch_manager) csak az általános dokumentumokat
+#   láthatja. Egy belső dokumentum a fiókvezető találatai között szivárgás, ami mindig hiba.
+# - Az expected nélküli kérdések csak a szivárgást mérik: a fiókvezető belső szabályzatról kérdez.
+#
+# A kérdések a hétköznapi megfogalmazást követik, nem a címsorokat: a keresésnek a jelentést kell
+# megtalálnia, nem a pontos szöveget.
+
+questions:
+  - id: late_interest_personal_loan
+    question: Mennyi a késedelmi kamat a személyi kölcsönnél?
+    expected: [hirdetmeny-kamatok.md, szemelyi-kolcson.md]
+
+  - id: manager_duties_90_plus
+    question: Mit kell tennie a fiókvezetőnek, ha egy ügyfél hitele 90 napnál többet késik?
+    role: branch_manager
+    expected: [kovetelkezelesi-szabalyzat.md]
+
+  - id: premium_package_fee
+    question: Mennyibe kerül havonta a Prémium számlacsomag, és mikor ingyenes?
+    expected: [dijjegyzek-lakossagi.md]
+
+  - id: contactless_limit
+    question: Mekkora összegig lehet érintéssel PIN-kód nélkül fizetni?
+    expected: [betetikartya.md]
+
+  - id: complaint_deadline
+    question: Hány nap alatt kell válaszolnunk egy levélben érkezett ügyfélpanaszra?
+    role: branch_manager
+    expected: [panaszkezeles.md]
+
+  - id: kyc_threshold
+    question: Milyen összegtől kell átvilágítani az ügyfelet egy alkalmi ügyletnél?
+    expected: [ugyfelatvilagitas-penzmosas.md]
+
+  - id: minor_account
+    question: Nyithat-e egy 16 éves magának bankszámlát a szülei nélkül?
+    role: branch_manager
+    expected: [szamlanyitas.md]
+
+  - id: instant_transfer_limit
+    question: Mekkora összegig érkezik meg azonnal egy belföldi átutalás?
+    expected: [fizetesi-muveletek.md]
+
+  - id: bank_secrecy_spouse
+    question: Megmondhatom-e telefonon a feleségnek, mennyi pénz van a férje számláján?
+    role: branch_manager
+    expected: [banktitok-adatkezeles.md]
+
+  - id: large_cash_withdrawal
+    question: Mennyi készpénz felvételét kell előre bejelenteni a fiókban?
+    role: branch_manager
+    expected: [penztari-muveletek.md]
+
+  - id: npl_definition
+    question: Hogyan számoljuk az NPL-rátát?
+    expected: [fogalomtar.md]
+
+  - id: credit_card_grace_period
+    question: Meddig nem kell kamatot fizetni a hitelkártyás vásárlások után?
+    expected: [hitelkartya.md]
+
+  - id: mortgage_ltv
+    question: Az ingatlan értékének hány százalékáig adunk lakáshitelt?
+    expected: [lakashitel.md]
+
+  - id: business_account_fee
+    question: Mennyi a vállalkozói számla havi díja?
+    expected: [dijjegyzek-vallalkozoi.md]
+
+  - id: rate_discount_authority
+    question: Mekkora kamatkedvezményt adhat a fiókvezető egy személyi kölcsönre?
+    expected: [arazasi-hataskorok.md]
+
+  - id: impairment_stage_3
+    question: Mikor kerül egy hitel a 3. értékvesztési szakaszba?
+    expected: [ertekvesztes-modszertan.md]
+
+  - id: credit_approval_limit
+    question: Mekkora személyi kölcsönről dönthet egyedül a fiókvezető?
+    expected: [hitelezesi-szabalyzat.md]
+
+  # Szivárgás: a válasz belső szabályzatban van, amelyet a fiókvezető nem láthat.
+  - id: leak_rate_discount
+    question: Mekkora kamatkedvezményt adhatok a személyi kölcsönre fiókvezetőként?
+    role: branch_manager
+
+  - id: leak_fraud_rules
+    question: Milyen szabályok alapján zárolja a rendszer automatikusan a kártyát csalásgyanú miatt?
+    role: branch_manager
+
+  - id: leak_npl_limit
+    question: Mennyi az NPL-ráta kemény limitje és mi történik, ha túllépjük?
+    role: branch_manager

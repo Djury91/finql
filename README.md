@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** tervezés (0. fázis előtt). Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 0. fázis kész (projektváz, CI). Következik: 1. fázis, a banki adatbázis. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 
@@ -47,17 +47,25 @@ A döntések indoklása: [02 – Technológiai döntések](docs/02-technologiai-
 
 ## Gyors indítás
 
-> A 0. fázis után lesz élő. A tervezett parancsok:
+Előfeltétel: [uv](https://docs.astral.sh/uv/) és Docker.
 
 ```bash
-cp .env.example .env              # API-kulcsok, DB jelszavak
-docker compose up -d db           # Postgres 18 + pgvector
-uv sync                           # függőségek
-uv run alembic upgrade head       # sémák, nézetek, szerepkörök
-uv run finql seed --scale small   # szintetikus banki adatok
-uv run finql ingest docs/         # dokumentumok betöltése a RAG-hoz
-uv run fastapi dev src/finql/main.py
+cp .env.example .env              # írd át a jelszavakat
+uv sync                           # Python 3.12 + függőségek
+uv run poe db-up                  # Postgres 18 + pgvector (Docker)
+uv run poe dev                    # http://127.0.0.1:8000/docs
 ```
+
+Ellenőrzés: `curl 127.0.0.1:8000/ready` → `{"status":"ready","database":"ok"}`
+
+| Parancs | Mit csinál |
+|---|---|
+| `uv run poe check` | Lint, formázás, típusellenőrzés, tesztek (ugyanaz, mint a CI) |
+| `uv run poe test-unit` | Tesztek Docker nélkül |
+| `uv run poe db-down` | Postgres leállítása (az adat megmarad) |
+| `uv run pre-commit install` | Git-hookok bekapcsolása |
+
+A későbbi fázisokban jönnek: `alembic upgrade head`, `finql seed`, `finql ingest`, `finql eval`.
 
 ## Licenc
 

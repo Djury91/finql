@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** 3. fázis kész (Text-to-SQL a teljes biztonsági lánccal: validátor, költségőr, read-only futtatás, napló). Következik: 4. fázis, eval és few-shot. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 4. fázis: az eval harness és a dinamikus few-shot kész (50 arany és 20 rosszindulatú kérdés, végrehajtási pontosság, riport); a valódi modellel mért számok API-kulcsra várnak. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 
@@ -16,7 +16,7 @@
 | **Agent** | „Hány ügyfelünk késik 90 napnál többet, és mit ír erről a behajtási szabályzat?” | Eszközhívás: az LLM a saját SQL- és dokumentumkereső eszközeinket hívja |
 | **Jogosultság** | A fiókvezető csak a saját fiókja adatait látja | PostgreSQL Row-Level Security + szerepkörök |
 | **Audit** | Minden kérdés, generált SQL, elutasítás és tokenköltség naplózva | Csak hozzáfűzhető (append-only) `query_log` |
-| **Értékelés** | 50 „arany” kérdés, végrehajtási pontosság mérése | Saját eval harness, riport |
+| **Értékelés** | 50 „arany” és 20 rosszindulatú kérdés, végrehajtási pontosság mérése | Saját eval harness, riport, futások az adatbázisban |
 
 ## Miért ez a projekt?
 
@@ -79,6 +79,27 @@ az egész bankra, a pécsi fiókvezetőnek csak a pécsi fiókra felel (Row-Leve
 Minden kísérlet (az elutasítottak is) a `query_log` táblába kerül: `GET /query/history` (saját),
 `GET /audit/queries` (auditor). Az LLM által látott séma: `GET /schema`.
 
+### Minőségmérés (eval) és few-shot
+
+```bash
+uv run finql examples sync            # few-shot példák betöltése embeddinggel (FINQL_VOYAGE_API_KEY)
+uv run finql eval run                 # 50 arany + 20 rosszindulatú kérdés a valódi modellel
+uv run finql eval run --few-shot 3    # ugyanez a 3 leghasonlóbb példával a promptban
+uv run finql eval compare 1 2         # két futás: fő számok, javult és romlott kérdések
+uv run poe eval-oracle                # a harness önellenőrzése API-kulcs nélkül (100%-ot kell adnia)
+```
+
+Egy arany kérdés akkor helyes, ha a generált SQL ugyanazt az eredményt adja, mint a kézzel írt
+(az oszlopnév és a sorrend nem számít, csak rangsornál). A rosszindulatú kérdésre nem jöhet vissza
+adat. A riport az `eval/reports/` mappába kerül, a futások az `eval_runs`/`eval_results` táblákba.
+A módszer: [ADR-007](docs/02-technologiai-dontesek.md).
+
+Kulcs nélkül a few-shot a `FINQL_EMBEDDING_PROVIDER=hashing` beállítással is kipróbálható (csak
+lexikális hasonlóság). Az `eval.yml` workflow kézzel indítható a GitHubon (secretek:
+`ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`).
+
+### Fejlesztői parancsok
+
 | Parancs | Mit csinál |
 |---|---|
 | `uv run poe check` | Lint, formázás, típusellenőrzés, tesztek (ugyanaz, mint a CI) |
@@ -87,7 +108,7 @@ Minden kísérlet (az elutasítottak is) a `query_log` táblába kerül: `GET /q
 | `uv run poe db-down` | Postgres leállítása (az adat megmarad) |
 | `uv run pre-commit install` | Git-hookok bekapcsolása |
 
-A későbbi fázisokban jönnek: `finql ingest`, `finql eval`.
+A későbbi fázisokban jön: `finql ingest` (RAG).
 
 ## Licenc
 

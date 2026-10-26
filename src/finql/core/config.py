@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     # Self-repair rounds after an SQL error (the first attempt not counted).
     sql_max_repairs: int = Field(default=2, ge=0)
 
+    # --- Dynamic few-shot: the most similar curated examples go into the prompt ---
+    # 0 turns it off. Without an embedder (no Voyage key) it is off as well.
+    few_shot_k: int = Field(default=3, ge=0, le=10)
+    # "hashing": deterministic, offline, lexical similarity only (tests, demo without a key).
+    embedding_provider: Literal["voyage", "hashing"] = "voyage"
+    voyage_api_key: SecretStr | None = None
+    # 1024 dimensions, like the vector(1024) columns. A model change means re-embedding
+    # (`finql examples sync`): the vectors of two models are not comparable.
+    embedding_model: str = "voyage-4"
+    embedding_timeout_seconds: float = Field(default=10, gt=0)
+
     @property
     def json_logs(self) -> bool:
         return self.log_json if self.log_json is not None else self.env != "dev"

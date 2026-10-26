@@ -14,9 +14,10 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 # Every object belongs to finql_owner, whoever runs the migration (finql_migrator or an admin).
 OWNER_ROLE = "finql_owner"
 
-# Hand-written SQL (db/) owns these schemas. Autogenerate must not see them, otherwise it
-# would offer to drop every table that has no SQLAlchemy model.
-DB_FIRST_SCHEMAS = frozenset({"bank", "analytics", "app_ctx"})
+# Hand-written SQL (db/) owns these schemas (`extensions`: pgvector, from `finql db bootstrap`).
+# Autogenerate must not see them, otherwise it would offer to drop every table that has no
+# SQLAlchemy model.
+DB_FIRST_SCHEMAS = frozenset({"bank", "analytics", "app_ctx", "extensions"})
 
 target_metadata = Base.metadata
 

@@ -11,11 +11,13 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     SmallInteger,
     Text,
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from finql.core.base_model import Base
@@ -79,6 +81,9 @@ class QueryLog(Base):
     duration_ms: Mapped[int | None]  # database time (EXPLAIN + execution)
     model: Mapped[str | None] = mapped_column(Text)
     prompt_version: Mapped[str | None] = mapped_column(Text)
+    # The few-shot examples (app.sql_examples) the prompt contained. No foreign key: the log is
+    # append-only and must not block an example's deletion.
+    example_ids: Mapped[list[int] | None] = mapped_column(ARRAY(Integer))
     input_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     llm_latency_ms: Mapped[int | None]

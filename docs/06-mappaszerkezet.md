@@ -42,6 +42,7 @@ finql/
 │   ├── bank/                      # 000_schema … 010_transactions.sql, 020_indexes.sql, 090_grants.sql
 │   ├── analytics/                 # nézetek, havi összesítő, 090_comments.sql, 099_ownership_grants.sql
 │   ├── security/                  # 001_app_ctx.sql (session-kontextus), 010_rls.sql (policy-k)
+│   ├── extensions/                # 001_pgvector.sql: a vector bővítmény (`finql db bootstrap`, superuser)
 │   └── app/                       # 000_schema.sql: az app séma és a finql_app alapjogai
 │
 ├── migrations/                    # Alembic
@@ -51,13 +52,16 @@ finql/
 │       ├── 0001_bank_schema.py            # run_sql_file("bank/…"): DB-first SQL-fájlok futtatása
 │       ├── 0002_rls.py                    # app_ctx + policy-k (a nézetek már ezekre épülnek)
 │       ├── 0003_analytics_views.py
-│       └── 0004_app_schema_and_users.py   # code-first: autogenerate + review
+│       ├── 0004_app_schema_and_users.py   # code-first: autogenerate + review
+│       ├── 0005_query_log.py
+│       ├── 0006_sql_examples.py
+│       └── 0007_eval_runs.py
 │
 ├── src/finql/
 │   ├── __init__.py
 │   ├── main.py                    # FastAPI app factory, lifespan (pool-ok, katalógus-cache)
 │   ├── health.py                  # /health (liveness), /ready (DB-ping, 503 ha nem elérhető)
-│   ├── cli.py                     # typer: db bootstrap, seed, user create/demo, ingest, eval
+│   ├── cli.py                     # typer: db bootstrap, seed, user create/demo, examples sync, eval run/compare, ingest
 │   ├── models.py                  # minden ORM-modul egy helyen (Alembic target_metadata)
 │   │
 │   ├── core/                      # közös infrastruktúra, nincs benne üzleti logika
@@ -83,7 +87,7 @@ finql/
 │   │   ├── client.py              # LLMClient protokoll
 │   │   ├── anthropic_client.py    # Claude-implementáció
 │   │   ├── fake_client.py         # determinisztikus mock a tesztekhez
-│   │   ├── embeddings.py          # Embedder protokoll + Voyage / helyi implementáció
+│   │   ├── embeddings.py          # Embedder protokoll + Voyage, hash-alapú (kulcs nélkül)
 │   │   ├── usage.py               # token- és költségnaplózás, felhasználói keret
 │   │   └── prompts/               # verziózott promptok (.md / .j2)
 │   │       ├── text_to_sql.v1.md
@@ -94,7 +98,7 @@ finql/
 │   │   ├── router.py              # POST /query, GET /query/history, GET /schema
 │   │   ├── service.py             # a teljes folyamat összefűzése, önjavító ciklus
 │   │   ├── schema_context.py      # analytics-katalógus betöltése és cache-e
-│   │   ├── examples.py            # few-shot példák vektoros kiválasztása
+│   │   ├── examples.py            # few-shot példák: YAML → app.sql_examples (sync), vektoros kiválasztás
 │   │   ├── models.py              # SqlExample
 │   │   ├── generator.py           # LLM → GeneratedQuery (Pydantic)
 │   │   ├── validator.py           # sqlglot AST-szabályok
@@ -118,6 +122,17 @@ finql/
 │   │   ├── models.py              # Conversation, Message
 │   │   └── schemas.py
 │   │
+│   ├── eval/                      # a minőség mérése (`finql eval run`)
+│   │   ├── datasets.py            # a kérdéssorok sémája és betöltése
+│   │   ├── compare.py             # végrehajtási pontosság: eredményhalmazok összevetése
+│   │   ├── runner.py              # kérdések az API folyamatán (service.run_attempts), bírálat
+│   │   ├── metrics.py             # pontosság, érvényes SQL, elutasítás, p50/p95, tokenek
+│   │   ├── report.py              # markdown-riport és két futás összevetése
+│   │   ├── store.py               # eval_runs / eval_results
+│   │   ├── oracle.py              # ál-LLM az elvárt SQL-lel: a harness önellenőrzése
+│   │   ├── models.py              # EvalRun, EvalResult
+│   │   └── run.py                 # a CLI-parancsok összekötése (beállítások → futás → riport)
+│   │
 │   ├── audit/
 │   │   ├── router.py              # GET /audit/queries (auditor)
 │   │   ├── service.py             # log_query(...): saját tranzakcióban
@@ -136,23 +151,23 @@ finql/
 │           └── run.py             # hash-alapú inkrementális betöltés
 │
 ├── data/
+│   ├── sql_examples.yaml          # few-shot példák (kérdés + SQL), `finql examples sync`
 │   └── documents/                 # szintetikus banki szabályzatok (md), a RAG forrása
 │       ├── hitelezesi-szabalyzat.md
 │       ├── dijjegyzek-2026.md
 │       └── kartyahasznalati-feltetelek.md
 │
-├── eval/
+├── eval/                          # adat: a kód a src/finql/eval csomagban (a CLI-ből importálható)
 │   ├── datasets/
-│   │   ├── golden.yaml            # kérdés, elvárt SQL, címkék, szerepkör-kontextus
-│   │   └── adversarial.yaml       # elutasítandó kérdések
-│   ├── runner.py                  # futtatás, eredményhalmazok összevetése
-│   ├── metrics.py                 # végrehajtási pontosság, érvényességi arány, késleltetés, tokenek
+│   │   ├── golden.yaml            # 50 kérdés: elvárt SQL, nehézség, címkék, szerepkör
+│   │   └── adversarial.yaml       # 20 elutasítandó kérdés, kategóriánként
 │   └── reports/                   # generált markdown-riportok (gitignore, kivéve a kiemelteket)
 │
 └── tests/
     ├── conftest.py                # testcontainers Postgres, migráció, tiny seed, fake LLM
     ├── unit/
     │   ├── text_to_sql/test_validator.py
+    │   ├── eval/test_compare.py   # mikor ugyanaz a válasz; test_datasets.py: szivárgásőr
     │   ├── rag/test_chunking.py
     │   └── …
     └── integration/
@@ -160,6 +175,8 @@ finql/
         ├── test_analytics.py      # példakérdések, leírások teljessége, konzisztencia
         ├── test_readonly.py       # írás az llm_reader szerepkörrel → hiba
         ├── test_query_api.py
+        ├── test_examples.py       # few-shot: sync, kiválasztás, prompt és napló
+        ├── test_eval.py           # orákulum: 100%; szkriptelt válaszok bírálata
         └── test_hybrid_search.py
 ```
 

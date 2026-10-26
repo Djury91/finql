@@ -33,3 +33,6 @@ data/cache/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Claude Code személyes beállításai
+.claude/settings.local.json

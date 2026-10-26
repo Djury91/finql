@@ -7,7 +7,7 @@
 | `bank` | A banki domain nyers táblái (ügyfelek, számlák, tranzakciók…) | **DB-first** (`db/bank/*.sql`) | Csak a `finql_analytics` (nézettulajdonos) |
 | `analytics` | Nézetek: az LLM számára kiajánlott **szemantikai réteg**, PII nélkül | **DB-first** (`db/analytics/*.sql`) | `finql_llm_reader` |
 | `app` | Alkalmazásadatok: felhasználók, beszélgetések, napló, dokumentumok, embeddingek | **Code-first** (SQLAlchemy → Alembic) | `finql_app` |
-| `app_ctx` | Segédfüggvények a session-kontextushoz (RLS) | DB-first | mindenki (`EXECUTE`) |
+| `app_ctx` | Segédfüggvények a session-kontextushoz (RLS) | DB-first (`db/security/*.sql`) | `finql_analytics`, `finql_llm_reader` (`EXECUTE`) |
 
 ## 2. Adatbázis-szerepkörök
 
@@ -32,7 +32,7 @@ uv run alembic upgrade head   # FINQL_MIGRATION_DATABASE_URL-lel (finql_migrator
 
 | Lépés | Ki futtatja | Mit csinál |
 |---|---|---|
-| `db/roles/001_roles.sql` | admin (`finql db bootstrap`) | Létrehozza a szerepköröket, és minden futáskor újra rögzíti az attribútumaikat (`NOSUPERUSER … NOBYPASSRLS`). Beállítja a `finql_llm_reader` session-korlátait. Az adatbázis tulajdonosa a `finql_owner` lesz, `CONNECT` joga csak a mi szerepköreinknek van. |
+| `db/roles/001_roles.sql` | admin (`finql db bootstrap`) | Létrehozza a szerepköröket, és minden futáskor újra rögzíti az attribútumaikat (`NOSUPERUSER … NOBYPASSRLS`). Beállítja a `finql_llm_reader` session-korlátait (read-only, `statement_timeout`, `search_path`, `jit = off`). A `finql_owner` `SET`-joggal (de `INHERIT` nélkül) tagja lesz a `finql_analytics`-nak, hogy átadhassa neki a nézeteket. Az adatbázis tulajdonosa a `finql_owner` lesz, `CONNECT` joga csak a mi szerepköreinknek van. |
 | Jelszavak | admin (`finql db bootstrap`) | A jelszó a komponens saját kapcsolati URL-jéből jön (`FINQL_DATABASE_URL` → `finql_app` stb.). Minden jelszó egy helyen van megadva, a repóban sehol. |
 | Migrációk | `finql_migrator` | Az `env.py` első lépése `SET ROLE finql_owner`, így minden objektum (az Alembic verziótáblája is) a `finql_owner`-é, bárki futtatja is. |
 
@@ -232,41 +232,62 @@ COMMENT ON COLUMN analytics.customers.segment IS
 
 Elvek:
 - **Csak a nézetek láthatók.** Ezek stabil, dokumentált, kérdezésre optimalizált felületet adnak.
-- **Nincs PII:** név, adóazonosító, teljes IBAN és születési dátum nem szerepel. Helyettük korcsoport és maszkolt IBAN.
-- **Előre számolt fogalmak:** `amount_huf`, `days_past_due`, `is_active`, hogy az LLM ne találgassa az üzleti logikát.
-- **Lassú aggregátumok:** materializált nézetben, éjszakai frissítéssel.
+- **Nincs PII:** név, adóazonosító, teljes IBAN, születési dátum, kártyaszám vége és tranzakciós közlemény nem szerepel. Helyettük korcsoport és maszkolt IBAN.
+- **Előre számolt fogalmak:** `amount_huf`, `days_past_due`, `dpd_bucket`, `is_active`, hogy az LLM ne találgassa az üzleti logikát.
+- **A „ma” az üzleti nap** (`analytics.business_day`), nem a `current_date`.
+- **Minden nézetnek és oszlopnak van leírása** (`COMMENT ON`, `db/analytics/090_comments.sql`): jelentés, egység, lehetséges értékek, használati tipp. Ebből áll össze a 3. fázisban az LLM-kontextus. Teszt ellenőrzi, hogy egy sem hiányzik.
 
-| Nézet | Tartalom |
-|---|---|
-| `analytics.branches` | Fiókok (kód, név, város, régió) |
-| `analytics.customers` | Ügyfél-ID, típus, szegmens, város, `age_band`, otthoni fiók, kockázati besorolás, `is_active` |
-| `analytics.accounts` | Számla, terméktípus, deviza, státusz, nyitás/zárás, maszkolt IBAN, fiók |
-| `analytics.transactions` | Tételek + `amount_huf`, `booked_date` (budapesti idő), kereskedő neve és kategóriája, csatorna |
-| `analytics.loans` | Hitelek + `days_past_due`, `dpd_bucket` ('0', '1-30', '31-60', '61-90', '90+'), fennálló tőke |
-| `analytics.monthly_account_summary` | *Materializált:* számla × hónap: be- és kifolyás, tételszám |
+| Nézet | Tartalom | Fiókhoz kötött |
+|---|---|---|
+| `branches`, `products`, `merchants`, `fx_rates`, `business_day` | Törzsadatok | nem |
+| `customers` | Ügyfél-ID, típus, szegmens, város, `age_band`, otthoni fiók, kockázati besorolás, `customer_since`, `is_active` | igen |
+| `accounts` | Számla, termék és terméktípus, deviza, státusz, `is_active`, nyitás/zárás, hitelkeret, maszkolt IBAN, fiók | igen |
+| `cards` | Kártya, típus, státusz, kibocsátás, lejárat | igen |
+| `transactions` | Tételek + `amount_huf`, `booked_date` (budapesti idő), kereskedő neve és kategóriája, csatorna | igen |
+| `loans` | Hitelek + `remaining_amount`, `overdue_amount`, `days_past_due`, `dpd_bucket` ('0', '1-30', '31-60', '61-90', '90+') | igen |
+| `monthly_account_summary` | Számla × hónap: tételszám, be- és kifolyás, kártyás költés (materializált összesítőből) | igen |
 
 ```sql
--- db/analytics/020_transactions.sql
-CREATE VIEW analytics.transactions WITH (security_barrier = true) AS
-SELECT t.transaction_id,
-       t.account_id,
-       t.branch_id,
-       t.booked_at,
+-- db/analytics/030_transactions.sql (részlet)
+CREATE VIEW analytics.transactions AS
+SELECT t.transaction_id, t.account_id, t.branch_id, t.booked_at,
        (t.booked_at AT TIME ZONE 'Europe/Budapest')::date AS booked_date,
-       t.amount,
-       t.currency,
-       round(t.amount * coalesce(fx.rate_to_huf, 1), 2) AS amount_huf,
-       t.channel,
-       m.name     AS merchant_name,
-       m.category AS merchant_category
+       t.amount, t.currency,
+       -- hiányzó árfolyamnál NULL, nem csendben 1
+       CASE WHEN t.currency = 'HUF' THEN t.amount ELSE round(t.amount * fx.rate_to_huf, 2) END AS amount_huf,
+       t.channel, t.merchant_id, m.name AS merchant_name, m.category AS merchant_category
 FROM bank.transactions t
 LEFT JOIN bank.merchants m ON m.merchant_id = t.merchant_id
 LEFT JOIN bank.fx_rates fx
        ON fx.currency = t.currency
       AND fx.rate_date = (t.booked_at AT TIME ZONE 'Europe/Budapest')::date;
-
-ALTER VIEW analytics.transactions OWNER TO finql_analytics;
 ```
+
+A nézeteket a `finql_owner` hozza létre, a leírásokat is ő írja, és **utolsó lépésként** adja át
+őket a `finql_analytics`-nak (`099_ownership_grants.sql`). A `finql_owner` csak `SET`-joggal tagja a
+`finql_analytics`-nak, `INHERIT`-tel nem, így a tulajdonosváltás után már nem módosíthatja őket.
+
+### A materializált összesítő és az RLS
+
+A materializált nézet **pillanatfelvétel**: a lekérdezésekor az alaptáblák RLS-e nem érvényesül,
+és materializált nézetre policy sem tehető. Ha az LLM közvetlenül olvashatná, egy fiókvezető minden
+fiók havi adatát látná. Ezért:
+
+- a nyers összesítő a `bank` sémában van (`bank.monthly_account_summary`, a táblatulajdonosé, a seed frissíti);
+- az LLM csak az `analytics.monthly_account_summary` nézetet látja, amely a policy-kkel azonos fiókfeltétellel szűr (`security_barrier`, hogy a felhasználó szűrője ne futhasson előbb);
+- a `finql_llm_reader` közvetlen hozzáférését teszt zárja ki.
+
+### Teljesítmény: amit a mérés mutatott
+
+A `small` skálán (2 millió tranzakció) a példakérdések először időtúllépéssel (5 s) álltak le.
+Három javítás után mindegyik 200 ms alatt fut:
+
+| Probléma | Ok | Javítás |
+|---|---|---|
+| `rows=1` becslés, ezért nested loop több százezer × több ezer sorra | A nézet `channel::text`-re castolta az enumot, így a `channel = 'card'` szűrőhöz nem volt statisztika (0,5% helyett valójában ~34%) | Az enum oszlopok castolás nélkül kerülnek a nézetbe |
+| A szűrő nem jutott le a nézet alá | `security_barrier` minden nézeten; az enum `=` operátora nem `LEAKPROOF` | `security_barrier` csak ott, ahol a nézet maga szűr (havi összesítő). A többi nézetnél a szűrést az RLS végzi, amely amúgy is a felhasználó szűrői előtt fut. |
+| ~200-szoros alulbecslés „minden fiók” módban | Az inline-olt `app_ctx` függvények kifejezésére a tervezőnek nincs statisztikája | A policy-k skalár részlekérdezést használnak: `(SELECT app_ctx.all_branches())`. Ez InitPlanként egyszer fut le (fiókszinten 218 → 81 ms), és a becslés ~2-szeres pontosságon belül marad. |
+| 90 ms-os hitellekérdezésből 400 ms | JIT-fordítás (~300 ms) a magas becsült költség miatt | `ALTER ROLE finql_llm_reader SET jit = off`: az LLM rövid, interaktív lekérdezéseket futtat |
 
 ## 5. Row-Level Security (fiókszintű láthatóság)
 
@@ -276,15 +297,13 @@ függvény-engedélylistája zárja ki.
 
 ```sql
 -- db/security/001_app_ctx.sql
-CREATE SCHEMA app_ctx;
-
 CREATE FUNCTION app_ctx.branch_id() RETURNS int
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT nullif(current_setting('app.branch_id', true), '')::int
 $$;
 
 CREATE FUNCTION app_ctx.all_branches() RETURNS boolean
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE AS $$
     SELECT coalesce(current_setting('app.scope', true), '') = 'all'
 $$;
 
@@ -292,12 +311,14 @@ $$;
 ALTER TABLE bank.transactions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY branch_scope ON bank.transactions
     FOR SELECT TO finql_analytics
-    USING (app_ctx.all_branches() OR branch_id = app_ctx.branch_id());
--- ugyanígy: customers (home_branch_id), accounts, cards, loans …
+    USING ((SELECT app_ctx.all_branches()) OR branch_id = (SELECT app_ctx.branch_id()));
+-- ugyanígy: customers (home_branch_id), accounts; cards, loans, loan_installments a számlán keresztül (EXISTS)
 ```
 
-**Fail-closed:** kontextus nélkül `branch_id = NULL`, vagyis 0 sor. Egy elfelejtett beállítás
-így nem vezet adatszivárgáshoz.
+- **Fail-closed:** kontextus nélkül `branch_id = NULL`, vagyis 0 sor. Egy elfelejtett beállítás így nem vezet adatszivárgáshoz. Érvénytelen érték (pl. `'7 OR true'`) esetén a cast hibát dob, a lekérdezés elbukik.
+- **Kinek szól a policy?** Csak a `finql_analytics`-nak, mert a nézetek az ő nevében olvassák a táblákat. Más szerepkörre nincs policy, így bekapcsolt RLS mellett alapból semmit sem látnak. A táblatulajdonos (migráció, seed) nem érintett.
+- **`EXECUTE` jog:** a policy-ben hívott függvények jogát a PostgreSQL a lekérdezést futtató szerepkörre ellenőrzi (nem a nézet tulajdonosára), ezért a `finql_llm_reader` is kap `EXECUTE`-ot az `app_ctx` függvényekre.
+- **Ismert határ:** az adatbázis önmagában nem akadályozza meg, hogy az LLM-szerepkör egy `SET app.scope = 'all'` vagy egy `set_config(...)` hívással kitágítsa a saját kontextusát. Ezt a 2. réteg zárja ki (a validátor csak egyetlen `SELECT`-et enged, függvény-engedélylistával), lásd [05 – Text-to-SQL biztonság](05-text-to-sql-biztonsag.md). Az RLS a fiókvezető hibás vagy rosszindulatú *kérdése* ellen véd, a validátor a *generált SQL* ellen.
 
 A futtatás menete az alkalmazásban:
 
@@ -309,6 +330,12 @@ SET LOCAL statement_timeout = '5s';
 <validált LLM-SQL, LIMIT-tel>;
 COMMIT;
 ```
+
+A biztonsági tulajdonságokat integrációs tesztek rögzítik (`tests/integration/test_security.py`):
+kontextus nélkül 0 sor, fiókszinten pontosan a saját fiók sorai, `all` módban minden sor, a pécsi
+fiókvezető nem látja a budaörsi ügyfeleket, nincs írás (read-write tranzakcióban sem), nincs PII
+oszlop, maszkolt IBAN, a materializált összesítő közvetlenül nem olvasható, a nézettulajdonos nem
+kerülheti meg az RLS-t, és az LLM-szerepkör csak az `analytics` és az `app_ctx` sémát látja.
 
 ## 6. `app` séma (code-first, SQLAlchemy)
 
@@ -391,7 +418,7 @@ uv run finql seed --scale small            # --seed 42 az alapértelmezés; --re
 
 | Skála | Ügyfél | Számla | Tranzakció | Időtáv | Futásidő* | Cél |
 |---|---|---|---|---|---|---|
-| `tiny` | 200 | ~470 | ~20 000 | 3 hónap | ~1 s | Unit- és integrációs tesztek, CI |
+| `tiny` | 200 | ~470 | ~30 000 | 15 hónap | ~1 s | Unit- és integrációs tesztek, CI (15 hónap: legyen „tavaly szeptember” és negyedéves összevetés) |
 | `small` | 10 000 | ~24 000 | ~2 millió | 24 hónap | ~55 s | Fejlesztés, demó |
 | `large` | 50 000 | ~120 000 | ~15 millió | 36 hónap | ~7 perc (becslés) | Teljesítménytesztek, EXPLAIN-küszöbök hangolása |
 
@@ -401,7 +428,7 @@ uv run finql seed --scale small            # --seed 42 az alapértelmezés; --re
 - **Magyar adatok:** Faker `hu_HU` nevek és cégnevek, valódi fiókvárosok és környékbeli települések, érvényes ellenőrzőszámú IBAN (a nem kiosztott `999` bankkóddal), adóazonosító jel és adószám.
 - **Valószerű eloszlások:** szegmensenként eltérő költési szint és kategóriapreferencia, havi fizetés vagy nyugdíj, csoportos beszedések (a gáz télen drágább), hétvégi és decemberi csúcs, ünnepnapi visszaesés, Zipf-eloszlású kereskedőnépszerűség, annuitásos hiteltörlesztés, évi 4,5%-os árszintemelkedés.
 - **Kalibráció:** a generátor előre kiszámolja a várható tételszámot, és úgy állítja be az aktivitási szintet, hogy a tranzakciók száma a skála céljának ±10%-án belül legyen.
-- **Betöltés `COPY`-val** (psycopg 3), egy tranzakcióban. A `transactions` másodlagos indexeit és FK-it a betöltés előtt eldobja, utána a katalógusból kiolvasott definíciókkal újraépíti (`pg_get_indexdef`, `pg_get_constraintdef`), végül `VACUUM (ANALYZE)` fut. Ha egy sor a default partícióba kerülne, a betöltés hibával leáll.
+- **Betöltés `COPY`-val** (psycopg 3), egy tranzakcióban. A `transactions` másodlagos indexeit és FK-it a betöltés előtt eldobja, utána a katalógusból kiolvasott definíciókkal újraépíti (`pg_get_indexdef`, `pg_get_constraintdef`), végül `VACUUM (ANALYZE)` fut. Ha egy sor a default partícióba kerülne, a betöltés hibával leáll. A végén frissíti a materializált havi összesítőt is.
 
 ### Beépített „történetek”
 

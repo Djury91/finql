@@ -27,7 +27,7 @@ def test_hungarian_holidays_include_movable_feasts() -> None:
 def test_scale_period_is_whole_months_ending_with_the_business_date() -> None:
     tiny, small = SCALES["tiny"], SCALES["small"]
 
-    assert (tiny.period_start, tiny.business_date) == (date(2026, 7, 1), date(2026, 9, 30))
+    assert (tiny.period_start, tiny.business_date) == (date(2025, 7, 1), date(2026, 9, 30))
     assert (small.period_start, small.business_date) == (date(2024, 10, 1), date(2026, 9, 30))
 
 

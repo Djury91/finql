@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** 1. fázis folyamatban: a banki séma, a szerepkörök és a szintetikus adatok kész, következnek az analytics nézetek és az RLS. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 1. fázis kész (banki adatbázis, szintetikus adatok, PII-mentes nézetek, RLS). Következik: 2. fázis, FastAPI-gerinc és auth. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 

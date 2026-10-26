@@ -34,11 +34,18 @@ $$;
 -- A migrator a tulajdonos nevében hoz létre objektumokat (SET ROLE finql_owner).
 GRANT finql_owner TO finql_migrator;
 
+-- A tulajdonos átadhatja a nézeteket a finql_analytics-nak (ALTER VIEW … OWNER TO), de a jogait
+-- nem örökli (INHERIT FALSE): a két szerepkör jogosultsága nem keveredik.
+GRANT finql_analytics TO finql_owner WITH INHERIT FALSE, SET TRUE;
+
 -- Az LLM-szerepkör session-szintű korlátai. A futtató tranzakción belül szigoríthat rajtuk.
 ALTER ROLE finql_llm_reader SET default_transaction_read_only = on;
 ALTER ROLE finql_llm_reader SET statement_timeout = '5s';
 ALTER ROLE finql_llm_reader SET idle_in_transaction_session_timeout = '10s';
 ALTER ROLE finql_llm_reader SET search_path = analytics;
+-- A JIT-fordítás a rövid, interaktív lekérdezéseken többe kerül, mint amennyit hoz
+-- (a small skálán egy 90 ms-os hitellekérdezésből így 400 ms lett).
+ALTER ROLE finql_llm_reader SET jit = off;
 
 -- Adatbázisszint: a finql_owner a tulajdonos, így sémát hozhat létre, és övé a public séma is
 -- (PG15+: a public séma tulajdonosa a pg_database_owner). Csatlakozni csak a mi szerepköreink tudnak.

@@ -62,6 +62,7 @@ async def query(
         llm_engine=request.app.state.llm_engine,
         log_sessionmaker=request.app.state.sessionmaker,
         settings=settings,
+        examples=request.app.state.example_selector,
     )
     answer = await service.answer_question(
         pipeline, session, user, body.question, request_id=current_request_id()

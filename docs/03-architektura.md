@@ -88,7 +88,7 @@ sequenceDiagram
 | Lépés | Modul | Megjegyzés |
 |---|---|---|
 | Sémakontextus | `text_to_sql/schema_context.py` | Az `analytics` séma katalógusa (`information_schema` + `pg_description`). Induláskor betöltjük és cache-eljük. Nagy sémánál csak a kérdéshez releváns nézeteket adjuk át. |
-| Few-shot példák | `text_to_sql/examples.py` | `app.sql_examples` tábla: kérdés–SQL párok embeddinggel. A top 3 leghasonlóbb kerül a promptba. |
+| Few-shot példák | `text_to_sql/examples.py` | `app.sql_examples` tábla: kérdés–SQL párok embeddinggel (forrás: `data/sql_examples.yaml`, betöltés: `finql examples sync`). A 3 leghasonlóbb kérdés a felhasználói üzenetbe kerül, nem a rendszerpromptba (az így cache-elhető marad). Ha az embedding nem elérhető, a kérdés példák nélkül megy tovább. |
 | Generálás | `text_to_sql/generator.py` | Strukturált kimenet (Pydantic-séma), a prompt a `llm/prompts/` mappában verziózva |
 | Validálás | `text_to_sql/validator.py` | Részletek: [05 – Text-to-SQL biztonság](05-text-to-sql-biztonsag.md) |
 | Költségőr | `text_to_sql/cost_guard.py` | `EXPLAIN` total cost és becsült sorszám küszöbbel |

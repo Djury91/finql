@@ -43,6 +43,10 @@ ALTER ROLE finql_llm_reader SET default_transaction_read_only = on;
 ALTER ROLE finql_llm_reader SET statement_timeout = '5s';
 ALTER ROLE finql_llm_reader SET idle_in_transaction_session_timeout = '10s';
 ALTER ROLE finql_llm_reader SET search_path = analytics;
+-- A bank naptára: a dátumliterál (booked_at >= '2025-09-01') budapesti éjfélt jelent, mint a
+-- booked_date, a havi összesítő és a havi partíciók határa. UTC-ben a hónap két órával
+-- elcsúszna, és a lekérdezés a szomszédos partíciót is olvasná.
+ALTER ROLE finql_llm_reader SET timezone = 'Europe/Budapest';
 -- A JIT-fordítás a rövid, interaktív lekérdezéseken többe kerül, mint amennyit hoz
 -- (a small skálán egy 90 ms-os hitellekérdezésből így 400 ms lett).
 ALTER ROLE finql_llm_reader SET jit = off;

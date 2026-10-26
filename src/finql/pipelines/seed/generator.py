@@ -501,7 +501,9 @@ class SeedGenerator:
             limit = self.rng.uniform(200_000, 1_000_000) * amount_factor
             account.credit_limit = int(round(limit / 50_000) * 50_000) or 50_000
 
-        has_card = profile == "credit_card" or profile == "personal_current"
+        # A personal FX account has a debit card too: its card spend is the foreign merchants'
+        # traffic (_card_row). Without one, foreign merchants would have no transactions at all.
+        has_card = profile in ("credit_card", "personal_current", "personal_fx")
         if profile == "business_current":
             has_card = self.rng.random() < 0.7
         if has_card:

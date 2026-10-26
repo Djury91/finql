@@ -1,0 +1,89 @@
+name: Eval
+
+# A text-to-SQL minőségének mérése a valódi modellel: csak kézi indításra, mert pénzbe kerül
+# (egy teljes futás 70 kérdés, önjavítással ~70–100 modellhívás). A riport letölthető artifact,
+# és a futás összefoglalójában is megjelenik. Secretek: ANTHROPIC_API_KEY, VOYAGE_API_KEY
+# (ez utóbbi csak few-shothoz kell).
+on:
+  workflow_dispatch:
+    inputs:
+      few_shot:
+        description: "Few-shot példák száma (0 = nincs)"
+        default: "3"
+        type: choice
+        options: ["0", "3"]
+      dataset:
+        description: "Kérdéssor"
+        default: all
+        type: choice
+        options: [all, golden, adversarial]
+      label:
+        description: "Megjegyzés a futáshoz"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      db:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: finql
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d finql"
+          --health-interval 2s --health-timeout 3s --health-retries 15
+          --shm-size 512mb
+    env:
+      # Egyszer használatos CI-adatbázis: a jelszavak itt nem titkok.
+      FINQL_ADMIN_DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/finql
+      FINQL_MIGRATION_DATABASE_URL: postgresql+psycopg://finql_migrator:ci-migrator@127.0.0.1:5432/finql
+      FINQL_DATABASE_URL: postgresql+asyncpg://finql_app:ci-app@127.0.0.1:5432/finql
+      FINQL_LLM_DATABASE_URL: postgresql+asyncpg://finql_llm_reader:ci-llm@127.0.0.1:5432/finql
+      FINQL_JWT_SECRET: ci-eval-only-the-api-does-not-run-here-0000
+      FINQL_ENV: test
+      FINQL_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      FINQL_VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Függőségek
+        run: uv sync --locked
+
+      - name: Adatbázis (szerepkörök, migrációk, small skála)
+        run: |
+          uv run finql db bootstrap
+          uv run alembic upgrade head
+          uv run finql seed --scale small
+
+      - name: Few-shot példák
+        if: inputs.few_shot != '0'
+        run: uv run finql examples sync
+
+      - name: Eval
+        run: >-
+          uv run finql eval run
+          --dataset ${{ inputs.dataset }}
+          --few-shot ${{ inputs.few_shot }}
+          --label "${{ inputs.label || github.ref_name }}"
+
+      - name: Riport az összefoglalóba
+        if: always()
+        run: cat eval/reports/run-*.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: eval/reports/run-*.md
+          if-no-files-found: ignore

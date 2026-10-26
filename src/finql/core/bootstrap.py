@@ -1,4 +1,4 @@
-"""One-time, admin-level database setup: roles, passwords, database ownership."""
+"""One-time, admin-level database setup: roles, passwords, database ownership, extensions."""
 
 from collections.abc import Iterable
 
@@ -13,7 +13,7 @@ LOGIN_ROLES = ("finql_migrator", "finql_app", "finql_llm_reader")
 
 
 def bootstrap_database(admin_url: str, login_urls: Iterable[str]) -> list[str]:
-    """Create the roles (idempotent) and set the login passwords.
+    """Create the roles and the extensions (idempotent) and set the login passwords.
 
     Passwords come from the connection URLs the components will use, so each password has a
     single source of truth. Returns the login roles that got no password (they cannot log in).
@@ -26,6 +26,7 @@ def bootstrap_database(admin_url: str, login_urls: Iterable[str]) -> list[str]:
 
     with psycopg.connect(psycopg_conninfo(admin_url)) as conn:
         conn.execute(read_sql("roles/001_roles.sql"))
+        conn.execute(read_sql("extensions/001_pgvector.sql"))
         for role, password in sorted(passwords.items()):
             conn.execute(
                 sql.SQL("ALTER ROLE {} PASSWORD {}").format(

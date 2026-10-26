@@ -32,7 +32,8 @@ uv run alembic upgrade head   # FINQL_MIGRATION_DATABASE_URL-lel (finql_migrator
 
 | Lépés | Ki futtatja | Mit csinál |
 |---|---|---|
-| `db/roles/001_roles.sql` | admin (`finql db bootstrap`) | Létrehozza a szerepköröket, és minden futáskor újra rögzíti az attribútumaikat (`NOSUPERUSER … NOBYPASSRLS`). Beállítja a `finql_llm_reader` session-korlátait (read-only, `statement_timeout`, `search_path`, `jit = off`). A `finql_owner` `SET`-joggal (de `INHERIT` nélkül) tagja lesz a `finql_analytics`-nak, hogy átadhassa neki a nézeteket. Az adatbázis tulajdonosa a `finql_owner` lesz, `CONNECT` joga csak a mi szerepköreinknek van. |
+| `db/roles/001_roles.sql` | admin (`finql db bootstrap`) | Létrehozza a szerepköröket, és minden futáskor újra rögzíti az attribútumaikat (`NOSUPERUSER … NOBYPASSRLS`). Beállítja a `finql_llm_reader` session-korlátait (read-only, `statement_timeout`, `search_path`, `jit = off`) és időzónáját (`Europe/Budapest`). A `finql_owner` `SET`-joggal (de `INHERIT` nélkül) tagja lesz a `finql_analytics`-nak, hogy átadhassa neki a nézeteket. Az adatbázis tulajdonosa a `finql_owner` lesz, `CONNECT` joga csak a mi szerepköreinknek van. |
+| `db/extensions/001_pgvector.sql` | admin (`finql db bootstrap`) | A `vector` bővítmény egy saját `extensions` sémában (a pgvector nem „trusted”, csak superuser hozhatja létre). `USAGE` csak a `finql_owner`-nek és a `finql_app`-nak; az adatbázis `search_path`-ja a sémanév nélküli `vector` típus és `<=>` operátor miatt tartalmazza. |
 | Jelszavak | admin (`finql db bootstrap`) | A jelszó a komponens saját kapcsolati URL-jéből jön (`FINQL_DATABASE_URL` → `finql_app` stb.). Minden jelszó egy helyen van megadva, a repóban sehol. |
 | Migrációk | `finql_migrator` | Az `env.py` első lépése `SET ROLE finql_owner`, így minden objektum (az Alembic verziótáblája is) a `finql_owner`-é, bárki futtatja is. |
 
@@ -42,11 +43,19 @@ ALTER ROLE finql_llm_reader SET default_transaction_read_only = on;
 ALTER ROLE finql_llm_reader SET statement_timeout = '5s';
 ALTER ROLE finql_llm_reader SET idle_in_transaction_session_timeout = '10s';
 ALTER ROLE finql_llm_reader SET search_path = analytics;
+ALTER ROLE finql_llm_reader SET timezone = 'Europe/Budapest';
 
 -- db/bank/090_grants.sql: táblánként, NEM „ON ALL TABLES IN SCHEMA bank”
 GRANT USAGE ON SCHEMA bank TO finql_analytics;
 GRANT SELECT ON bank.branches, bank.customers, bank.accounts, …, bank.transactions TO finql_analytics;
 ```
+
+**Miért budapesti időzóna?** A bank naptára budapesti: a havi partíciók határa, a `booked_date`
+és a havi összesítő is budapesti éjféltől számol. UTC-session esetén a generált SQL
+`booked_at >= '2025-09-01'` feltétele két órával később kezdené a hónapot, így más eredményt adna,
+mint a `booked_date`-re vagy az összesítőre írt változat, és a szomszédos partíciót is olvasná.
+Ezt a 4. fázis evalja hozta elő; teszt őrzi (`test_executor.py`). A válaszban az időbélyegek
+szintén budapesti időben jelennek meg (`executor._jsonable`).
 
 **Miért táblánként?** Az `ON ALL TABLES IN SCHEMA` a havi partíciókra is jogot adna. Ha egy
 partíciót közvetlenül kérdezünk le, a szülőtábla RLS-policyja nem érvényesül, csak a partícióé.
@@ -356,11 +365,15 @@ hivatkozik, a seed érthető hibával leáll.
 | `users` | `id uuid PK`, `email UNIQUE`, `password_hash`, `full_name`, `role` (enum), `branch_id NULL`, `is_active`, `daily_token_budget`, `created_at` | `branch_id` csak `branch_manager` esetén kötelező (CHECK); FK a `bank.branches`-re (code-first → DB-first); az e-mail kisbetűsen tárolva (CHECK) |
 | `conversations` | `id`, `user_id FK`, `title`, `created_at`, `updated_at` | |
 | `messages` | `id`, `conversation_id FK`, `role` (user/assistant/tool), `content jsonb`, `model`, `input_tokens`, `output_tokens`, `latency_ms`, `created_at` | Az eszközhívások is itt vannak |
-| `query_log` | `id bigint identity`, `user_id`, `scope`, `branch_id`, `question`, `attempt`, `status` (enum), `generated_sql`, `executed_sql`, `rejection_reason`, `explain_cost`, `row_count`, `duration_ms`, `model`, `prompt_version`, `input_tokens`, `output_tokens`, `llm_latency_ms`, `request_id`, `created_at` | **Append-only:** `finql_app` csak `INSERT` és `SELECT` joggal (`db/app/010_query_log.sql`). Kísérletenként egy sor; a `scope` és a `branch_id` a futáskori hatókör. A `message_id` a 6. fázisban jön a `messages` táblával. |
+| `query_log` | `id bigint identity`, `user_id`, `scope`, `branch_id`, `question`, `attempt`, `status` (enum), `generated_sql`, `executed_sql`, `rejection_reason`, `explain_cost`, `row_count`, `duration_ms`, `model`, `prompt_version`, `example_ids int[]`, `input_tokens`, `output_tokens`, `llm_latency_ms`, `request_id`, `created_at` | **Append-only:** `finql_app` csak `INSERT` és `SELECT` joggal (`db/app/010_query_log.sql`). Kísérletenként egy sor; a `scope` és a `branch_id` a futáskori hatókör. A `message_id` a 6. fázisban jön a `messages` táblával. |
 | `documents` | `id`, `title`, `source_path UNIQUE`, `doc_type`, `min_role`, `content_hash`, `version`, `ingested_at` | A hash alapján ismerjük fel a változást |
 | `document_chunks` | `id`, `document_id FK ON DELETE CASCADE`, `chunk_index`, `content`, `token_count`, `embedding vector(1024)`, `embedding_model`, `tsv tsvector GENERATED`, `metadata jsonb` | HNSW- és GIN-index |
-| `sql_examples` | `id`, `question`, `sql`, `tags text[]`, `embedding vector(1024)`, `is_active` | Dinamikus few-shot példák |
-| `eval_runs` / `eval_results` | futás: modell, promptverzió, pontosság; eredmény: kérdés-ID, helyes-e, SQL, hiba | Az eval-trendek az adatbázisban követhetők |
+| `sql_examples` | `id`, `question UNIQUE`, `sql`, `tags text[]`, `embedding vector(1024)`, `embedding_model`, `is_active`, `created_at`, `updated_at` | Dinamikus few-shot példák (forrás: `data/sql_examples.yaml`). A kiválasztás csak az aktuális modell vektorait hasonlítja össze. A fájlból törölt példa `is_active = false` lesz, nem törlődik: a `query_log.example_ids` hivatkozhat rá. Vektorindex nincs: pár tucat sort a szekvenciális olvasás gyorsabban végignéz. |
+| `eval_runs` | `id`, `started_at`, `finished_at`, `model`, `prompt_version`, `few_shot_k`, `embedding_model`, `git_commit`, `label`, `question_count`, `accuracy`, `valid_sql_rate`, `refusal_rate`, `latency_p50_ms`, `latency_p95_ms`, `avg_tokens`, `metrics jsonb` | Egy `finql eval run`: ami a számokat befolyásolhatja, és a fő metrikák. A trend egy lekérdezés. |
+| `eval_results` | `id`, `run_id FK ON DELETE CASCADE`, `dataset`, `question_id`, `question`, `scope`, `branch_id`, `passed`, `status`, `reason`, `generated_sql`, `attempts`, `latency_ms`, `input_tokens`, `output_tokens`, `example_ids`; `UNIQUE (run_id, dataset, question_id)` | Kérdésenként egy sor: két futás összevetése (`finql eval compare`) ebből készül. |
+
+A `query_log.example_ids` mondja meg, mely few-shot példák voltak a kísérlet promptjában. Idegen
+kulcs nincs: a napló csak hozzáfűzhető, és nem akadályozhatja egy példa törlését.
 
 `query_log.status` értékei: `ok`, `declined` (az LLM nem írt SQL-t, mert a kérdés nem
 válaszolható meg, vagy biztonsági okból elutasította), `rejected_validation`, `rejected_cost`,
@@ -444,7 +457,7 @@ uv run finql seed --scale small            # --seed 42 az alapértelmezés; --re
 
 - **Reprodukálható:** rögzített a `seed` és az időszak is. Az utolsó hónap 2026 szeptembere, az üzleti nap 2026-09-30, nem „a tegnapi nap”. Így az eval-kérdések elvárt válaszai nem avulnak el. Minden lustán generált adatfolyam (ügyfelek, kártyák, tranzakciók) saját, a seedből származtatott véletlengenerátort kap, így a kimenet nem függ attól, mit olvastunk ki előbb.
 - **Magyar adatok:** Faker `hu_HU` nevek és cégnevek, valódi fiókvárosok és környékbeli települések, érvényes ellenőrzőszámú IBAN (a nem kiosztott `999` bankkóddal), adóazonosító jel és adószám.
-- **Valószerű eloszlások:** szegmensenként eltérő költési szint és kategóriapreferencia, havi fizetés vagy nyugdíj, csoportos beszedések (a gáz télen drágább), hétvégi és decemberi csúcs, ünnepnapi visszaesés, Zipf-eloszlású kereskedőnépszerűség, annuitásos hiteltörlesztés, évi 4,5%-os árszintemelkedés.
+- **Valószerű eloszlások:** szegmensenként eltérő költési szint és kategóriapreferencia, havi fizetés vagy nyugdíj, csoportos beszedések (a gáz télen drágább), hétvégi és decemberi csúcs, ünnepnapi visszaesés, Zipf-eloszlású kereskedőnépszerűség, a devizaszámlák kártyás költése külföldi kereskedőknél, annuitásos hiteltörlesztés, évi 4,5%-os árszintemelkedés.
 - **Kalibráció:** a generátor előre kiszámolja a várható tételszámot, és úgy állítja be az aktivitási szintet, hogy a tranzakciók száma a skála céljának ±10%-án belül legyen.
 - **Betöltés `COPY`-val** (psycopg 3), egy tranzakcióban. A `transactions` másodlagos indexeit és FK-it a betöltés előtt eldobja, utána a katalógusból kiolvasott definíciókkal újraépíti (`pg_get_indexdef`, `pg_get_constraintdef`), végül `VACUUM (ANALYZE)` fut. Ha egy sor a default partícióba kerülne, a betöltés hibával leáll. A végén frissíti a materializált havi összesítőt is.
 
@@ -454,7 +467,7 @@ Ezek teszik ellenőrizhetővé az eval-kérdéseket, mert ismert a helyes válas
 
 | # | Történet | Melyik kérdést szolgálja |
 |---|---|---|
-| 1 | A **Debreceni fiók** (`DEB01`) kártyás költése az utolsó negyedévben (2026 Q3) 40%-kal nő. A `small` skálán +57%, a második helyezett fióké +16%. | Melyik fiókban nőtt a legjobban a kártyás költés negyedéves összevetésben? |
+| 1 | A **Debreceni fiók** (`DEB01`) kártyás költése az utolsó negyedévben (2026 Q3) 40%-kal nő. A `small` skálán +58,5%, a második helyezett fióké +22%. | Melyik fiókban nőtt a legjobban a kártyás költés negyedéves összevetésben? |
 | 2 | **2025. márciusi kampány:** az új számlanyitások száma megduplázódik (`small`: 658, a többi hónapban átlagosan ~340). | Havi bontásban hogyan alakult az új számlanyitások száma 2025-ben? |
 | 3 | **Decemberi csúcs:** a kártyás költés ~30%-kal haladja meg a novemberit. A hét legerősebb napjai a péntek és a szombat. | Teljes kártyás forgalom egy adott hónapban, szezonalitás |
 | 4 | **Késedelmes hitelek:** ~4,4% (személyi kölcsön ~7,6%, lakáshitel ~1,8%). Magas kockázati besorolásnál ~5-ször akkora az esély, mint alacsonynál. | A hitelek hány százaléka késik 30/60/90 napnál többet, termékenként? |

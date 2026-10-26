@@ -11,6 +11,7 @@ from finql.text_to_sql.cost_guard import (
     check_estimate,
     parse_explain,
 )
+from finql.text_to_sql.examples import FewShotExample
 from finql.text_to_sql.generator import (
     GeneratedQuery,
     PreviousAttempt,
@@ -70,6 +71,21 @@ def test_user_prompt_carries_the_failed_attempt_in_a_repair_round() -> None:
     assert repair.startswith("Kérdés: Mennyi?")
     assert "SELECT x" in repair
     assert 'column "x" ...' in repair
+
+
+def test_few_shot_examples_go_before_the_question_in_the_user_prompt() -> None:
+    examples = [
+        FewShotExample(1, "Hány hitel késik?", "SELECT count(*) FROM loans\n"),
+        FewShotExample(2, "Hány kártya aktív?", "SELECT count(*) FROM cards"),
+    ]
+
+    prompt = user_prompt("Hány hitel késik 30 napnál többet?", examples=examples)
+
+    assert prompt.endswith("---\n\nKérdés: Hány hitel késik 30 napnál többet?")
+    assert "Kérdés: Hány hitel késik?\nSQL:\nSELECT count(*) FROM loans\n\n" in prompt
+    assert prompt.index("Hány kártya aktív?") < prompt.index("30 napnál")
+    # The system prompt does not change with the examples: it stays cacheable.
+    assert "Hány kártya aktív?" not in system_prompt(CATALOG)
 
 
 async def test_generate_returns_the_structured_answer() -> None:

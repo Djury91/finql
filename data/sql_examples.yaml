@@ -1,0 +1,255 @@
+# Few-shot példák: bevált kérdés–SQL párok. A hozzájuk leginkább hasonló 3 kerül a promptba
+# (dinamikus few-shot, finql/text_to_sql/examples.py). Betöltés: `finql examples sync`.
+#
+# - Minden SQL átmegy a validátoron, és lefut (a sync ellenőrzi, és egy teszt is).
+# - Egyik kérdés sem egyezhet az eval kérdéssoraival (eval/datasets): különben a few-shot
+#   hatásának mérése a válasz kiszivárgását mérné (tests/unit/eval/test_datasets.py).
+# - Üzleti nap: 2026-09-30. A relatív időt (idén, tavaly) a business_day-hez kötjük.
+
+examples:
+  - question: Hány nem megszüntetett hitelkártyaszámla van fiókonként?
+    tags: [aggregation, join]
+    sql: |
+      SELECT b.name AS branch, count(*) AS credit_card_accounts
+      FROM accounts a JOIN branches b USING (branch_id)
+      WHERE a.product_type = 'credit_card' AND a.status <> 'closed'
+      GROUP BY b.name ORDER BY credit_card_accounts DESC
+
+  - question: Mennyi volt a kártyás költés 2026 második negyedévében ügyfélszegmensenként?
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT c.segment, -sum(t.amount_huf) AS card_spend_huf
+      FROM transactions t
+      JOIN accounts a USING (account_id)
+      JOIN customers c USING (customer_id)
+      WHERE t.channel = 'card' AND t.booked_at >= '2026-04-01' AND t.booked_at < '2026-07-01'
+      GROUP BY c.segment ORDER BY card_spend_huf DESC
+
+  - question: Havi bontásban mennyi volt a teljes kártyás költés tavaly?
+    tags: [aggregation, time]
+    sql: |
+      SELECT month, sum(card_spend_huf) AS card_spend_huf
+      FROM monthly_account_summary, business_day
+      WHERE month >= date_trunc('year', business_date) - interval '1 year'
+        AND month < date_trunc('year', business_date)
+      GROUP BY month ORDER BY month
+
+  - question: Mennyi a késedelmes élő hitelek még fennálló tartozása hiteltípusonként?
+    tags: [aggregation, filter]
+    sql: |
+      SELECT product_type, count(*) AS late_loans, sum(remaining_amount) AS remaining_huf
+      FROM loans
+      WHERE status = 'active' AND days_past_due > 0
+      GROUP BY product_type ORDER BY remaining_huf DESC
+
+  - question: Melyik 10 kereskedőnél volt a legtöbb kártyás vásárlás 2026 szeptemberében?
+    tags: [aggregation, time, ranking]
+    sql: |
+      SELECT merchant_id, merchant_name, count(*) AS purchases
+      FROM transactions
+      WHERE channel = 'card' AND booked_at >= '2026-09-01' AND booked_at < '2026-10-01'
+      GROUP BY merchant_id, merchant_name ORDER BY purchases DESC LIMIT 10
+
+  - question: Hány új hitelkártyát bocsátottunk ki havonta idén?
+    tags: [aggregation, time]
+    sql: |
+      SELECT date_trunc('month', issued_at)::date AS month, count(*) AS issued_cards
+      FROM cards, business_day
+      WHERE card_type = 'credit' AND issued_at >= date_trunc('year', business_date)
+      GROUP BY 1 ORDER BY 1
+
+  - question: Mennyi az átlagos hitelkeret ügyfélszegmensenként a nem megszüntetett hitelkártyaszámlákon?
+    tags: [aggregation, join]
+    sql: |
+      SELECT c.segment, round(avg(a.credit_limit)) AS avg_credit_limit_huf
+      FROM accounts a JOIN customers c USING (customer_id)
+      WHERE a.product_type = 'credit_card' AND a.status <> 'closed'
+      GROUP BY c.segment ORDER BY avg_credit_limit_huf DESC
+
+  - question: Hány magánszemély ügyfél van korcsoportonként és kockázati besorolásonként?
+    tags: [aggregation]
+    sql: |
+      SELECT age_band, risk_rating, count(*) AS customers
+      FROM customers
+      WHERE customer_type = 'individual'
+      GROUP BY age_band, risk_rating ORDER BY age_band, risk_rating
+
+  - question: Mennyi volt a dollár átlagos középárfolyama 2026 harmadik negyedévében?
+    tags: [aggregation, time]
+    sql: |
+      SELECT round(avg(rate_to_huf), 2) AS avg_usd_rate
+      FROM fx_rates
+      WHERE currency = 'USD' AND rate_date >= '2026-07-01' AND rate_date < '2026-10-01'
+
+  - question: Fiókonként az élő hitelek hány százaléka késik 30 napnál többet?
+    tags: [aggregation, join]
+    sql: |
+      SELECT b.name AS branch, count(*) AS active_loans,
+             round(100.0 * avg((l.days_past_due > 30)::int), 1) AS over_30_pct
+      FROM loans l JOIN branches b USING (branch_id)
+      WHERE l.status = 'active'
+      GROUP BY b.name ORDER BY over_30_pct DESC
+
+  - question: A tavalyi kártyás költés hány százaléka ment élelmiszerboltokra?
+    tags: [aggregation, time]
+    sql: |
+      SELECT round(100 * sum(amount_huf) FILTER (WHERE merchant_category = 'grocery')
+                   / sum(amount_huf), 1) AS grocery_pct
+      FROM transactions, business_day
+      WHERE channel = 'card'
+        AND booked_at >= date_trunc('year', business_date) - interval '1 year'
+        AND booked_at < date_trunc('year', business_date)
+
+  - question: Hogyan változott 2026-ban havonta az új ügyfelek száma az előző hónaphoz képest?
+    tags: [aggregation, time, window]
+    sql: |
+      WITH monthly AS (
+        SELECT date_trunc('month', customer_since)::date AS month, count(*) AS new_customers
+        FROM customers
+        WHERE customer_since >= '2025-12-01'
+        GROUP BY 1
+      )
+      SELECT month, new_customers,
+             new_customers - lag(new_customers) OVER (ORDER BY month) AS change
+      FROM monthly
+      ORDER BY month
+
+  - question: Hány ügyfélnek van élő hitele, de nincs nem megszüntetett folyószámlája?
+    tags: [subquery]
+    sql: |
+      SELECT count(DISTINCT l.customer_id) AS customers
+      FROM loans l
+      WHERE l.status = 'active'
+        AND NOT EXISTS (
+          SELECT FROM accounts a
+          WHERE a.customer_id = l.customer_id
+            AND a.product_type = 'current_account' AND a.status <> 'closed'
+        )
+
+  - question: Rangsorold a fiókokat az idei kártyás költés alapján!
+    tags: [aggregation, join, time, window, ranking]
+    sql: |
+      SELECT b.name AS branch, sum(m.card_spend_huf) AS card_spend_huf,
+             rank() OVER (ORDER BY sum(m.card_spend_huf) DESC) AS rank
+      FROM monthly_account_summary m JOIN branches b USING (branch_id), business_day
+      WHERE m.month >= date_trunc('year', business_date)
+      GROUP BY b.name ORDER BY rank
+
+  - question: Mennyi volt a napi kártyás forgalom 2026 szeptemberének utolsó hetében?
+    tags: [aggregation, time]
+    sql: |
+      SELECT booked_date, -sum(amount_huf) AS card_turnover_huf
+      FROM transactions
+      WHERE channel = 'card' AND booked_at >= '2026-09-24' AND booked_at < '2026-10-01'
+      GROUP BY booked_date ORDER BY booked_date
+
+  - question: Melyik 5 fiókban nyitották a legtöbb számlát idén?
+    tags: [aggregation, join, time, ranking]
+    sql: |
+      SELECT b.name AS branch, count(*) AS new_accounts
+      FROM accounts a JOIN branches b USING (branch_id), business_day
+      WHERE a.opened_at >= date_trunc('year', business_date)
+      GROUP BY b.name ORDER BY new_accounts DESC LIMIT 5
+
+  - question: Mennyi volt havonta a jóváírások és a terhelések összege a Szegedi fiókban 2026-ban?
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT m.month, sum(m.inflow_huf) AS inflow_huf, sum(m.outflow_huf) AS outflow_huf
+      FROM monthly_account_summary m JOIN branches b USING (branch_id)
+      WHERE b.code = 'SZE01' AND m.month >= '2026-01-01'
+      GROUP BY m.month ORDER BY m.month
+
+  - question: Hány aktív kártya jár le a következő három hónapban?
+    tags: [aggregation, time]
+    sql: |
+      SELECT count(*) AS expiring_cards
+      FROM cards, business_day
+      WHERE status = 'active'
+        AND expires_at > business_date AND expires_at <= business_date + interval '3 months'
+
+  - question: Mennyi az élő lakáshitelek átlagos futamideje években?
+    tags: [aggregation, filter]
+    sql: |
+      SELECT round(avg(term_months) / 12.0, 1) AS avg_term_years
+      FROM loans
+      WHERE product_type = 'mortgage' AND status = 'active'
+
+  - question: Mennyi bejövő átutalást kaptak a vállalati ügyfelek 2026 augusztusában, szegmensenként?
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT c.segment, sum(t.amount_huf) AS incoming_transfers_huf
+      FROM transactions t
+      JOIN accounts a USING (account_id)
+      JOIN customers c USING (customer_id)
+      WHERE t.channel = 'transfer' AND t.amount > 0 AND c.customer_type = 'company'
+        AND t.booked_at >= '2026-08-01' AND t.booked_at < '2026-09-01'
+      GROUP BY c.segment
+
+  - question: Hány tranzakció volt csatornánként az elmúlt 30 napban?
+    tags: [aggregation, time]
+    sql: |
+      SELECT channel, count(*) AS transactions
+      FROM transactions, business_day
+      WHERE booked_at >= business_date - 29 AND booked_at < business_date + 1
+      GROUP BY channel ORDER BY transactions DESC
+
+  - question: Melyik hónapban volt a legnagyobb a kártyás költés 2025-ben?
+    tags: [aggregation, time, ranking]
+    sql: |
+      SELECT month, sum(card_spend_huf) AS card_spend_huf
+      FROM monthly_account_summary
+      WHERE month >= '2025-01-01' AND month < '2026-01-01'
+      GROUP BY month ORDER BY card_spend_huf DESC LIMIT 1
+
+  - question: Átlagosan hány tranzakciója volt havonta egy lakossági folyószámlának 2026 első félévében?
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT round(avg(m.tx_count), 1) AS avg_monthly_transactions
+      FROM monthly_account_summary m JOIN accounts a USING (account_id)
+      WHERE a.product_name = 'Lakossági számlacsomag'
+        AND m.month >= '2026-01-01' AND m.month < '2026-07-01'
+
+  - question: Ügyfélszegmensenként mennyi az élő hitelek még fennálló tartozása?
+    tags: [aggregation, join]
+    sql: |
+      SELECT c.segment, sum(l.remaining_amount) AS remaining_huf
+      FROM loans l JOIN customers c USING (customer_id)
+      WHERE l.status = 'active'
+      GROUP BY c.segment ORDER BY remaining_huf DESC
+
+  - question: Átlagosan mennyit költött kártyával egy ügyfél 2026 szeptemberében, szegmensenként?
+    tags: [aggregation, join, time, subquery]
+    sql: |
+      WITH per_customer AS (
+        SELECT a.customer_id, -sum(t.amount_huf) AS spend_huf
+        FROM transactions t JOIN accounts a USING (account_id)
+        WHERE t.channel = 'card' AND t.booked_at >= '2026-09-01' AND t.booked_at < '2026-10-01'
+        GROUP BY a.customer_id
+      )
+      SELECT c.segment, round(avg(p.spend_huf)) AS avg_spend_huf, count(*) AS spending_customers
+      FROM per_customer p JOIN customers c USING (customer_id)
+      GROUP BY c.segment ORDER BY avg_spend_huf DESC
+
+  - question: Hogyan oszlik meg az idei kártyás költés a hét napjai között?
+    tags: [aggregation, time]
+    sql: |
+      SELECT extract(isodow FROM booked_date)::int AS iso_weekday, -sum(amount_huf) AS card_spend_huf
+      FROM transactions, business_day
+      WHERE channel = 'card' AND booked_at >= date_trunc('year', business_date)
+      GROUP BY 1 ORDER BY 1
+
+  - question: Hány számla nyílt 2026 harmadik negyedévében fiókonként, a fiók kódjával?
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT b.code, count(*) AS new_accounts
+      FROM accounts a JOIN branches b USING (branch_id)
+      WHERE a.opened_at >= '2026-07-01' AND a.opened_at < '2026-10-01'
+      GROUP BY b.code ORDER BY b.code
+
+  - question: Mennyit költöttek a devizaszámlák tulajdonosai kártyával külföldi kereskedőknél 2026-ban, forintban?
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT t.currency, -sum(t.amount_huf) AS card_spend_huf
+      FROM transactions t JOIN merchants m USING (merchant_id)
+      WHERE t.channel = 'card' AND m.country <> 'HU' AND t.booked_at >= '2026-01-01'
+      GROUP BY t.currency

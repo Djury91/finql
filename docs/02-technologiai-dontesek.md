@@ -144,6 +144,17 @@ végzi. Egy kevesebb rendszer, amit üzemeltetni kell.
 - API-kulcs nélkül (`FINQL_LLM_PROVIDER=fake`) az alkalmazás a projektterv példakérdéseire a kézzel
   írt SQL-lel válaszol, így a teljes biztonsági lánc kulcs és költség nélkül is kipróbálható.
 
+**Megvalósítás (4. fázis, embedding):**
+- `Embedder` protokoll (`llm/embeddings.py`), Voyage-implementáció `voyage-4` modellel,
+  1024 dimenzióval. A Voyage REST API-ját közvetlenül hívjuk (`httpx2`, ami az Anthropic SDK-val
+  már telepítve van), nem a Voyage SDK-jával: egyetlen végpontot használunk, és így nem jön be
+  újabb függőségi fa.
+- Kulcs nélküli változat: `HashingEmbedder` (szavak és betűhármasok hash-elése, determinisztikus).
+  Csak lexikális hasonlóságot fog meg, ezért nem a Voyage helyettesítője, de a tesztek és a
+  kulcs nélküli demó is értelmesen működik vele. A helyi `bge-m3` az 5. fázisban jöhet, ha kell.
+- A vektor mellett a modell neve is tárolva van, és a kiválasztás csak az aktuális modell
+  vektorait hasonlítja össze; modellváltáskor a `finql examples sync` újra embeddingel.
+
 ### ADR-006: A költségőr fő mércéje a becsült sorszám, nem a költség
 
 A `large` skálán (15 millió tranzakció) mérve az EXPLAIN *költsége* nem választja szét a jó és a
@@ -156,6 +167,31 @@ A tervben szereplő **legnagyobb köztes sorszám** viszont éles határt húz: 
 legfeljebb ~8 millió, a feltétel nélküli vagy rossz feltételű JOIN-oknál 70 milliótól 10¹⁴-ig.
 Ezért: sorszám-küszöb 50 millió (fő szabály), költségküszöb 100 millió (hátvéd). A mérés részletei:
 [05 – Text-to-SQL biztonság](05-text-to-sql-biztonsag.md).
+
+### ADR-007: Eval végrehajtási pontossággal; a few-shot példák a felhasználói üzenetben
+
+**Mit mérünk:** egy arany kérdés akkor helyes, ha a generált SQL **ugyanazt az eredményt** adja,
+mint a kézzel írt, nem ha ugyanúgy néz ki (execution accuracy). Az oszlopneveket nem nézzük
+(a modell szabadon nevez el), az elvárt oszlopokat érték szerint keressük meg a generáltak között,
+a többletoszlop megengedett. Sorrend csak rangsoros kérdésnél számít, a számok 0,05-ös
+tűréssel egyeznek (egy tizedesre kerekített százalék is jó), az éjféli időbélyeg egyenlő a
+dátumával. A rosszindulatú kérdés akkor helyes, ha nem jön vissza adat: a modell nem ír SQL-t,
+a validátor elutasítja, vagy az eredmény üres (csak NULL vagy 0, pl. egy másik fiókra az RLS miatt).
+
+**Ugyanaz a folyamat:** az eval a `text_to_sql.service.run_attempts`-on át kérdez, amin az API is:
+validátor, költségőr, önjavítás, minden. Csak a naplózás más: a kísérletek a memóriában
+gyűlnek, az eredmény az `eval_runs`/`eval_results` táblákba megy, a `query_log`-ba nem (az nem
+felhasználói tevékenység), és a napi tokenkeretet sem terheli.
+
+**Few-shot a felhasználói üzenetben:** a hasonló példák kérdésenként változnak. Ha a
+rendszerpromptba kerülnének, minden kérdés megtörné a prompt-cache-t; így a rendszerprompt
+(szabályok + séma) bájtra ugyanaz marad. A példák forrása egy YAML-fájl a repóban
+(`data/sql_examples.yaml`), amelyet kódként review-zunk; a `finql examples sync` tölti be. Egy
+teszt őrzi, hogy egyik példa se egyezzen egy eval-kérdéssel, különben a few-shot hatása helyett
+a válasz kiszivárgását mérnénk.
+
+**Orákulum:** egy ál-LLM, amely az elvárt SQL-t adja vissza. Vele a harness (kérdéssorok,
+hatókörök, összevetés, tárolás, riport) API-kulcs és költség nélkül tesztelhető: 100%-ot kell adnia.
 
 ### ADR-005: Fejlesztői eszközök
 
@@ -185,5 +221,6 @@ Ezért: sorszám-küszöb 50 millió (fő szabály), költségküszöb 100 milli
 | 004 | Provider-független LLM- és embedding-interfész, Claude az alapértelmezett | Elfogadva |
 | 005 | uv, ruff, mypy, pytest + testcontainers, sqlglot, typer | Elfogadva |
 | 006 | Költségőr: a becsült köztes sorszám a fő mérce, a költség csak hátvéd | Elfogadva (mérés alapján) |
+| 007 | Eval végrehajtási pontossággal, az API folyamatán; few-shot a felhasználói üzenetben | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

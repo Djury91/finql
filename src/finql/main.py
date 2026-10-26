@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 
 from finql import __version__, health
@@ -12,9 +13,13 @@ from finql.core.errors import install_error_handlers
 from finql.core.logging import RequestContextMiddleware, configure_logging
 from finql.llm.anthropic_client import AnthropicClient
 from finql.llm.client import LLMClient
+from finql.llm.embeddings import Embedder, VoyageEmbedder, build_embedder
 from finql.text_to_sql.demo import demo_llm_client
+from finql.text_to_sql.examples import build_example_selector
 from finql.text_to_sql.router import router as text_to_sql_router
 from finql.text_to_sql.schema_context import CatalogCache
+
+logger = structlog.get_logger(__name__)
 
 
 def build_llm_client(settings: Settings) -> LLMClient:
@@ -23,8 +28,14 @@ def build_llm_client(settings: Settings) -> LLMClient:
     return AnthropicClient(settings)
 
 
-def create_app(settings: Settings | None = None, *, llm_client: LLMClient | None = None) -> FastAPI:
-    """`llm_client`: tests pass a scripted fake; otherwise it follows FINQL_LLM_PROVIDER."""
+def create_app(
+    settings: Settings | None = None,
+    *,
+    llm_client: LLMClient | None = None,
+    embedder: Embedder | None = None,
+) -> FastAPI:
+    """`llm_client`, `embedder`: tests pass fakes; otherwise they follow the settings
+    (FINQL_LLM_PROVIDER, FINQL_EMBEDDING_PROVIDER)."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_logs=settings.json_logs)
 
@@ -41,11 +52,19 @@ def create_app(settings: Settings | None = None, *, llm_client: LLMClient | None
         )
         app.state.catalog_cache = CatalogCache()
         app.state.llm_client = llm_client or build_llm_client(settings)
+        app.state.embedder = embedder or build_embedder(settings)
+        app.state.example_selector = build_example_selector(
+            settings, app.state.sessionmaker, app.state.embedder
+        )
+        if app.state.example_selector is None and settings.few_shot_k > 0:
+            logger.warning("dynamic few-shot is off: no embedder (FINQL_VOYAGE_API_KEY)")
         try:
             yield
         finally:
             if isinstance(app.state.llm_client, AnthropicClient):
                 await app.state.llm_client.close()
+            if isinstance(app.state.embedder, VoyageEmbedder):
+                await app.state.embedder.close()
             await app.state.app_engine.dispose()
             if app.state.llm_engine is not None:
                 await app.state.llm_engine.dispose()

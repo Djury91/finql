@@ -1,0 +1,540 @@
+# Arany kérdéssor: kérdés + elvárt SQL. A generált SQL akkor helyes, ha ugyanazt az eredményt
+# adja, mint az elvárt (finql/eval/compare.py), bárhogy is néz ki.
+#
+# - Az üzleti nap 2026-09-30: „idén” = 2026, „tavaly” = 2025, „az utolsó negyedév” = 2026 Q3.
+# - A fiókvezetői kérdéseknél az elvárt SQL nem szűr fiókra: azt az RLS végzi (a prompt 7. szabálya).
+# - ordered: true csak ott, ahol a sorrend a válasz része (rangsor).
+# - Az elvárt eredmény legfeljebb 200 sor (a validátor alapértelmezett LIMIT-je).
+# - Egyik kérdés sem szerepelhet a few-shot példák (data/sql_examples.yaml) vagy a prompt
+#   példái között (tests/unit/eval/test_datasets.py ellenőrzi).
+
+questions:
+  # ---------------------------------------------------------------- könnyű
+  - id: active_customers_by_segment
+    question: Hány aktív ügyfelünk van szegmensenként?
+    difficulty: easy
+    tags: [aggregation]
+    sql: |
+      SELECT segment, count(*) AS customers
+      FROM customers WHERE is_active
+      GROUP BY segment
+
+  - id: loans_90_plus
+    question: Hány 90+ napos késedelmes hitelünk van?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT count(*) AS loans FROM loans WHERE days_past_due > 90
+
+  - id: branches_by_region
+    question: Hány fiókunk van régiónként?
+    difficulty: easy
+    tags: [aggregation]
+    sql: |
+      SELECT region, count(*) AS branches FROM branches GROUP BY region
+
+  - id: open_accounts_by_currency
+    question: Hány nem megszüntetett számla van devizanemenként?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT currency, count(*) AS accounts
+      FROM accounts WHERE status <> 'closed'
+      GROUP BY currency
+
+  - id: active_cards_by_type
+    question: Hány aktív bankkártya van kártyatípusonként?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT card_type, count(*) AS cards
+      FROM cards WHERE status = 'active'
+      GROUP BY card_type
+
+  - id: foreign_merchants_by_country
+    question: Hány külföldi kereskedő van országonként?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT country, count(*) AS merchants
+      FROM merchants WHERE country <> 'HU'
+      GROUP BY country
+
+  - id: high_risk_active_customers
+    question: Hány magas kockázati besorolású aktív ügyfelünk van?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT count(*) AS customers
+      FROM customers WHERE risk_rating = 'high' AND is_active
+
+  - id: savings_product_rates
+    question: Milyen megtakarítási termékeink vannak, és mennyi az éves kamatlábuk százalékban?
+    difficulty: easy
+    tags: [filter]
+    sql: |
+      SELECT name, round(100 * interest_rate, 1) AS interest_rate_pct
+      FROM products WHERE product_type = 'savings'
+
+  - id: individuals_by_age_band
+    question: Hogyan oszlanak meg a magánszemély ügyfeleink korcsoport szerint?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT age_band, count(*) AS customers
+      FROM customers WHERE customer_type = 'individual'
+      GROUP BY age_band
+
+  - id: accounts_opened_2025
+    question: Hány számlát nyitottak 2025-ben?
+    difficulty: easy
+    tags: [aggregation, time]
+    sql: |
+      SELECT count(*) AS accounts
+      FROM accounts WHERE opened_at >= '2025-01-01' AND opened_at < '2026-01-01'
+
+  - id: new_customers_this_year
+    question: Hány új ügyfelünk lett idén?
+    difficulty: easy
+    tags: [aggregation, time]
+    sql: |
+      SELECT count(*) AS customers
+      FROM customers, business_day
+      WHERE customer_since >= date_trunc('year', business_date)
+
+  - id: frozen_accounts_by_product
+    question: Hány zárolt számla van terméktípusonként?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT product_type, count(*) AS accounts
+      FROM accounts WHERE status = 'frozen'
+      GROUP BY product_type
+
+  - id: budapest_branches
+    question: Melyik fiókjaink vannak Budapesten? Kérem a fiókkódot és a nevet.
+    difficulty: easy
+    tags: [filter]
+    sql: |
+      SELECT code, name FROM branches WHERE city = 'Budapest'
+
+  - id: eur_rate_business_day
+    question: Mennyi volt az euró MNB-középárfolyama az üzleti napon?
+    difficulty: easy
+    tags: [filter, time]
+    sql: |
+      SELECT rate_to_huf
+      FROM fx_rates, business_day
+      WHERE currency = 'EUR' AND rate_date = business_date
+
+  - id: avg_principal_by_loan_type
+    question: Mekkora az átlagos folyósított hitelösszeg hiteltípusonként, egész forintra kerekítve?
+    difficulty: easy
+    tags: [aggregation]
+    sql: |
+      SELECT product_type, round(avg(principal)) AS avg_principal_huf
+      FROM loans
+      GROUP BY product_type
+
+  - id: active_loans_by_dpd_bucket
+    question: Hogyan oszlanak meg az élő hitelek a késedelmi sávok között?
+    difficulty: easy
+    tags: [aggregation, filter]
+    sql: |
+      SELECT dpd_bucket, count(*) AS loans
+      FROM loans WHERE status = 'active'
+      GROUP BY dpd_bucket
+
+  # ---------------------------------------------------------------- közepes
+  - id: card_turnover_last_september
+    question: Mennyi volt a teljes kártyás forgalom tavaly szeptemberben?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT -sum(amount_huf) AS card_turnover_huf
+      FROM transactions
+      WHERE channel = 'card' AND booked_at >= '2025-09-01' AND booked_at < '2025-10-01'
+
+  - id: new_accounts_monthly_this_year
+    question: Havi bontásban hogyan alakult az új számlanyitások száma idén?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT date_trunc('month', opened_at)::date AS month, count(*) AS new_accounts
+      FROM accounts
+      WHERE opened_at >= '2026-01-01'
+      GROUP BY 1
+
+  - id: new_accounts_monthly_2025
+    question: Havi bontásban hogyan alakult az új számlanyitások száma 2025-ben?
+    difficulty: medium
+    tags: [aggregation, time]
+    note: A márciusi kampány (seed-történet 2) duplázást mutat.
+    sql: |
+      SELECT date_trunc('month', opened_at)::date AS month, count(*) AS new_accounts
+      FROM accounts
+      WHERE opened_at >= '2025-01-01' AND opened_at < '2026-01-01'
+      GROUP BY 1
+
+  - id: delinquency_pct_by_product
+    question: Az élő hitelek hány százaléka késik 30, 60 és 90 napnál többet, hiteltípusonként?
+    difficulty: medium
+    tags: [aggregation]
+    sql: |
+      SELECT product_type,
+             round(100.0 * avg((days_past_due > 30)::int), 1) AS over_30_pct,
+             round(100.0 * avg((days_past_due > 60)::int), 1) AS over_60_pct,
+             round(100.0 * avg((days_past_due > 90)::int), 1) AS over_90_pct
+      FROM loans WHERE status = 'active'
+      GROUP BY product_type
+
+  - id: open_accounts_by_branch
+    question: Hány nem megszüntetett számlát kezelnek az egyes fiókok? A fiók nevével kérem.
+    difficulty: medium
+    tags: [aggregation, join]
+    sql: |
+      SELECT b.name, count(*) AS accounts
+      FROM accounts a JOIN branches b USING (branch_id)
+      WHERE a.status <> 'closed'
+      GROUP BY b.name
+
+  - id: fees_monthly_2025
+    question: Mennyi díjat terhelt a bank az ügyfelekre havonta 2025-ben?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT date_trunc('month', booked_date)::date AS month, -sum(amount_huf) AS fees_huf
+      FROM transactions
+      WHERE channel = 'fee' AND booked_at >= '2025-01-01' AND booked_at < '2026-01-01'
+      GROUP BY 1
+
+  - id: card_spend_by_category_q3
+    question: Mennyit költöttek kártyával kereskedőkategóriánként 2026 harmadik negyedévében?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT merchant_category, -sum(amount_huf) AS card_spend_huf
+      FROM transactions
+      WHERE channel = 'card' AND booked_at >= '2026-07-01' AND booked_at < '2026-10-01'
+      GROUP BY merchant_category
+
+  - id: overdue_amount_by_branch
+    question: Mennyi a lejárt, meg nem fizetett hiteltartozás összege fiókonként? A fiók nevével.
+    difficulty: medium
+    tags: [aggregation, join]
+    sql: |
+      SELECT b.name, sum(l.overdue_amount) AS overdue_huf
+      FROM loans l JOIN branches b USING (branch_id)
+      WHERE l.overdue_amount > 0
+      GROUP BY b.name
+
+  - id: loans_disbursed_2025
+    question: Hány hitelt és mekkora összegben folyósítottunk 2025-ben, hiteltípusonként?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT product_type, count(*) AS loans, sum(principal) AS principal_huf
+      FROM loans
+      WHERE start_date >= '2025-01-01' AND start_date < '2026-01-01'
+      GROUP BY product_type
+
+  - id: top5_cities_active_customers
+    question: Melyik 5 városban van a legtöbb aktív ügyfelünk?
+    difficulty: medium
+    tags: [aggregation, ranking]
+    ordered: true
+    sql: |
+      SELECT city, count(*) AS customers
+      FROM customers WHERE is_active
+      GROUP BY city ORDER BY customers DESC LIMIT 5
+
+  - id: foreign_card_spend_2025
+    question: Mennyit költöttek az ügyfeleink kártyával külföldön tavaly, országonként?
+    difficulty: medium
+    tags: [aggregation, join, time]
+    sql: |
+      SELECT m.country, -sum(t.amount_huf) AS card_spend_huf
+      FROM transactions t JOIN merchants m USING (merchant_id)
+      WHERE t.channel = 'card' AND m.country <> 'HU'
+        AND t.booked_at >= '2025-01-01' AND t.booked_at < '2026-01-01'
+      GROUP BY m.country
+
+  - id: eur_monthly_avg_2025
+    question: Mennyi volt az euró havi átlagos középárfolyama 2025-ben, két tizedesre kerekítve?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT date_trunc('month', rate_date)::date AS month, round(avg(rate_to_huf), 2) AS avg_rate
+      FROM fx_rates
+      WHERE currency = 'EUR' AND rate_date >= '2025-01-01' AND rate_date < '2026-01-01'
+      GROUP BY 1
+
+  - id: current_accounts_without_card
+    question: Hány aktív folyószámlához nem tartozik egyetlen aktív kártya sem?
+    difficulty: medium
+    tags: [subquery, filter]
+    sql: |
+      SELECT count(*) AS accounts
+      FROM accounts a
+      WHERE a.product_type = 'current_account' AND a.status = 'active'
+        AND NOT EXISTS (
+          SELECT FROM cards c WHERE c.account_id = a.account_id AND c.status = 'active'
+        )
+
+  - id: delinquency_by_risk_rating
+    question: Az élő hitelek hány százaléka késik, az adós kockázati besorolása szerint?
+    difficulty: medium
+    tags: [aggregation, join]
+    note: Késedelmes = days_past_due > 0 (a loans nézet leírása szerint).
+    sql: |
+      SELECT c.risk_rating, round(100.0 * avg((l.days_past_due > 0)::int), 1) AS late_pct
+      FROM loans l JOIN customers c USING (customer_id)
+      WHERE l.status = 'active'
+      GROUP BY c.risk_rating
+
+  - id: weekend_card_spend_share_2025
+    question: A 2025-ös kártyás költés hány százaléka esett hétvégére?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT round(100 * sum(amount_huf) FILTER (WHERE extract(isodow FROM booked_date) >= 6)
+                   / sum(amount_huf), 1) AS weekend_pct
+      FROM transactions
+      WHERE channel = 'card' AND booked_at >= '2025-01-01' AND booked_at < '2026-01-01'
+
+  - id: interest_credited_this_year
+    question: Mennyi kamatot írtunk jóvá az ügyfeleknek összesen idén?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT sum(amount_huf) AS interest_huf
+      FROM transactions
+      WHERE channel = 'interest' AND amount > 0 AND booked_at >= '2026-01-01'
+
+  - id: direct_debits_jan_vs_jul_2025
+    question: Mennyi volt a csoportos beszedések összege 2025 januárjában és júliusában?
+    difficulty: medium
+    tags: [aggregation, time]
+    note: A gázszámla télen drágább (seed).
+    sql: |
+      SELECT date_trunc('month', booked_date)::date AS month, -sum(amount_huf) AS direct_debit_huf
+      FROM transactions
+      WHERE channel = 'direct_debit'
+        AND ((booked_at >= '2025-01-01' AND booked_at < '2025-02-01')
+          OR (booked_at >= '2025-07-01' AND booked_at < '2025-08-01'))
+      GROUP BY 1
+
+  - id: active_mortgages_by_region
+    question: Hány élő lakáshitel van régiónként?
+    difficulty: medium
+    tags: [aggregation, join]
+    sql: |
+      SELECT b.region, count(*) AS mortgages
+      FROM loans l JOIN branches b USING (branch_id)
+      WHERE l.product_type = 'mortgage' AND l.status = 'active'
+      GROUP BY b.region
+
+  - id: accounts_closed_this_year
+    question: Hány számlát szüntettek meg idén, terméktípusonként?
+    difficulty: medium
+    tags: [aggregation, time]
+    sql: |
+      SELECT product_type, count(*) AS accounts
+      FROM accounts
+      WHERE closed_at >= '2026-01-01'
+      GROUP BY product_type
+
+  - id: personal_loan_delinquency_by_age
+    question: Az élő személyi kölcsönök hány százaléka késik 30 napnál többet, az adós korcsoportja szerint?
+    difficulty: medium
+    tags: [aggregation, join]
+    sql: |
+      SELECT c.age_band, round(100.0 * avg((l.days_past_due > 30)::int), 1) AS over_30_pct
+      FROM loans l JOIN customers c USING (customer_id)
+      WHERE l.product_type = 'personal_loan' AND l.status = 'active'
+      GROUP BY c.age_band
+
+  - id: branch_open_accounts_by_product
+    question: Hány nem megszüntetett számlát kezel a fiókunk, terméktípusonként?
+    role: branch_manager
+    branch: PEC01
+    difficulty: medium
+    tags: [aggregation, branch]
+    sql: |
+      SELECT product_type, count(*) AS accounts
+      FROM accounts WHERE status <> 'closed'
+      GROUP BY product_type
+
+  - id: branch_late_loans
+    question: Hány késedelmes élő hitel van a fiókunkban, és mennyi rajtuk a lejárt összeg?
+    role: branch_manager
+    branch: DEB01
+    difficulty: medium
+    tags: [aggregation, branch]
+    sql: |
+      SELECT count(*) AS loans, sum(overdue_amount) AS overdue_huf
+      FROM loans WHERE status = 'active' AND days_past_due > 0
+
+  - id: branch_card_spend_monthly
+    question: Hogyan alakult a fiókunk ügyfeleinek havi kártyás költése idén?
+    role: branch_manager
+    branch: PEC01
+    difficulty: medium
+    tags: [aggregation, time, branch]
+    sql: |
+      SELECT month, sum(card_spend_huf) AS card_spend_huf
+      FROM monthly_account_summary
+      WHERE month >= '2026-01-01'
+      GROUP BY month
+
+  # ---------------------------------------------------------------- nehéz
+  - id: top10_merchants_premium_this_year
+    question: Melyik 10 kereskedőnél költöttek legtöbbet a prémium ügyfelek idén?
+    difficulty: hard
+    tags: [aggregation, join, time, ranking]
+    ordered: true
+    sql: |
+      SELECT t.merchant_name, -sum(t.amount_huf) AS spend_huf
+      FROM transactions t
+      JOIN accounts a USING (account_id)
+      JOIN customers c USING (customer_id)
+      WHERE c.segment = 'premium' AND t.channel = 'card' AND t.booked_at >= '2026-01-01'
+      GROUP BY t.merchant_name ORDER BY spend_huf DESC LIMIT 10
+
+  - id: branch_card_growth_q3
+    question: Melyik fiókban nőtt a legjobban a kártyás költés 2026 harmadik negyedévében az előzőhöz képest?
+    difficulty: hard
+    tags: [aggregation, join, time, window, ranking]
+    note: Seed-történet 1, a Debreceni fiók.
+    sql: |
+      WITH q AS (
+        SELECT b.name,
+               sum(m.card_spend_huf) FILTER (WHERE m.month >= '2026-07-01') AS q3,
+               sum(m.card_spend_huf) FILTER (WHERE m.month < '2026-07-01') AS q2
+        FROM monthly_account_summary m JOIN branches b USING (branch_id)
+        WHERE m.month >= '2026-04-01' AND m.month < '2026-10-01'
+        GROUP BY b.name
+      )
+      SELECT name FROM q ORDER BY q3 / q2 DESC LIMIT 1
+
+  - id: december_vs_november_2025
+    question: Hány százalékkal volt nagyobb a kártyás költés 2025 decemberében, mint novemberében?
+    difficulty: hard
+    tags: [aggregation, time]
+    note: Seed-történet 3, ~30%.
+    sql: |
+      SELECT round(100 * (sum(card_spend_huf) FILTER (WHERE month = '2025-12-01')
+                          / sum(card_spend_huf) FILTER (WHERE month = '2025-11-01') - 1), 1)
+             AS growth_pct
+      FROM monthly_account_summary
+      WHERE month IN ('2025-11-01', '2025-12-01')
+
+  - id: top3_categories_per_segment_q3
+    question: Ügyfélszegmensenként melyik 3 kereskedőkategóriában költöttek a legtöbbet kártyával 2026 harmadik negyedévében?
+    difficulty: hard
+    tags: [aggregation, join, time, window, ranking]
+    note: >-
+      Kategóriára, nem kereskedőre kérdez: a kereskedőnevek nem egyediek (egy név több üzlet),
+      így a „top kereskedők kategóriánként” név és azonosító szerint mást adna.
+    sql: |
+      WITH spend AS (
+        SELECT c.segment, t.merchant_category, -sum(t.amount_huf) AS spend_huf,
+               row_number() OVER (PARTITION BY c.segment ORDER BY sum(t.amount_huf)) AS rn
+        FROM transactions t
+        JOIN accounts a USING (account_id)
+        JOIN customers c USING (customer_id)
+        WHERE t.channel = 'card' AND t.booked_at >= '2026-07-01' AND t.booked_at < '2026-10-01'
+        GROUP BY c.segment, t.merchant_category
+      )
+      SELECT segment, merchant_category, spend_huf FROM spend WHERE rn <= 3
+
+  - id: card_spend_cumulative_2026
+    question: Mutasd a 2026-os havi kártyás költést, és mellette az év eleje óta halmozott összeget!
+    difficulty: hard
+    tags: [aggregation, time, window]
+    sql: |
+      SELECT month, sum(card_spend_huf) AS card_spend_huf,
+             sum(sum(card_spend_huf)) OVER (ORDER BY month) AS cumulative_huf
+      FROM monthly_account_summary
+      WHERE month >= '2026-01-01'
+      GROUP BY month
+
+  - id: card_spend_mom_change_2026
+    question: Hány százalékkal változott a kártyás költés 2026 minden hónapjában az előző hónaphoz képest? A januárt a 2025. decemberihez mérd.
+    difficulty: hard
+    tags: [aggregation, time, window]
+    sql: |
+      WITH monthly AS (
+        SELECT month, sum(card_spend_huf) AS spend
+        FROM monthly_account_summary
+        WHERE month >= '2025-12-01'
+        GROUP BY month
+      ), change AS (
+        SELECT month, round(100 * (spend / lag(spend) OVER (ORDER BY month) - 1), 1) AS change_pct
+        FROM monthly
+      )
+      SELECT month, change_pct FROM change WHERE month >= '2026-01-01'
+
+  - id: customers_with_three_products
+    question: Hány ügyfélnek van egyszerre nem megszüntetett folyószámlája, megtakarítási számlája és hitelkártyája?
+    difficulty: hard
+    tags: [aggregation, subquery]
+    sql: |
+      SELECT count(*) AS customers
+      FROM (
+        SELECT customer_id
+        FROM accounts
+        WHERE status <> 'closed' AND product_type IN ('current_account', 'savings', 'credit_card')
+        GROUP BY customer_id
+        HAVING count(DISTINCT product_type) = 3
+      ) c
+
+  - id: leisure_spend_share_by_segment_2025
+    question: A prémium és a lakossági ügyfelek 2025-ös kártyás költésének hány százaléka ment éttermekre, szállásra és utazásra?
+    difficulty: hard
+    tags: [aggregation, join, time]
+    note: Seed-történet 5.
+    sql: |
+      SELECT c.segment,
+             round(100 * sum(t.amount_huf) FILTER (
+                   WHERE t.merchant_category IN ('restaurant', 'hotel', 'travel'))
+                   / sum(t.amount_huf), 1) AS leisure_pct
+      FROM transactions t
+      JOIN accounts a USING (account_id)
+      JOIN customers c USING (customer_id)
+      WHERE t.channel = 'card' AND c.segment IN ('premium', 'retail')
+        AND t.booked_at >= '2025-01-01' AND t.booked_at < '2026-01-01'
+      GROUP BY c.segment
+
+  - id: late_share_of_2025_loans
+    question: A 2025-ben folyósított hitelek hány százaléka késik most?
+    difficulty: hard
+    tags: [aggregation, time]
+    sql: |
+      SELECT round(100.0 * avg((days_past_due > 0)::int), 1) AS late_pct
+      FROM loans
+      WHERE start_date >= '2025-01-01' AND start_date < '2026-01-01'
+
+  - id: top5_customers_card_spend_this_year
+    question: Melyik 5 ügyfél költötte a legtöbbet kártyával idén? Az ügyfélazonosítóval és az összeggel.
+    difficulty: hard
+    tags: [aggregation, join, time, ranking]
+    ordered: true
+    sql: |
+      SELECT a.customer_id, -sum(t.amount_huf) AS card_spend_huf
+      FROM transactions t JOIN accounts a USING (account_id)
+      WHERE t.channel = 'card' AND t.booked_at >= '2026-01-01'
+      GROUP BY a.customer_id ORDER BY card_spend_huf DESC LIMIT 5
+
+  - id: branch_top_merchants_q3
+    question: Az utolsó negyedévben melyik 5 kereskedőnél költöttek a legtöbbet a fiókunk ügyfelei?
+    role: branch_manager
+    branch: DEB01
+    difficulty: hard
+    tags: [aggregation, time, ranking, branch]
+    ordered: true
+    sql: |
+      SELECT merchant_name, -sum(amount_huf) AS spend_huf
+      FROM transactions
+      WHERE channel = 'card' AND booked_at >= '2026-07-01' AND booked_at < '2026-10-01'
+      GROUP BY merchant_name ORDER BY spend_huf DESC LIMIT 5

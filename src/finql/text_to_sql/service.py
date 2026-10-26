@@ -1,9 +1,11 @@
 """The text-to-SQL pipeline: budget → LLM → validator → cost guard → read-only execution, with
 self-repair and an audit log entry for every attempt (docs/03-architektura.md, 2.)."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from finql.audit.models import QueryLog, QueryStatus
@@ -12,8 +14,10 @@ from finql.auth.models import User, UserRole
 from finql.core.config import Settings
 from finql.core.errors import AppError, PermissionDeniedError
 from finql.llm.client import LLMClient, LLMError, LLMRefusalError, LLMUsage
+from finql.llm.embeddings import EmbeddingError
 from finql.llm.usage import TokenBudgetExceededError, check_budget
 from finql.text_to_sql.cost_guard import QueryTooExpensiveError
+from finql.text_to_sql.examples import ExampleSelector, FewShotExample
 from finql.text_to_sql.executor import (
     DataScope,
     ExecutionLimits,
@@ -25,6 +29,8 @@ from finql.text_to_sql.generator import PROMPT_VERSION, PreviousAttempt, generat
 from finql.text_to_sql.schema_context import SchemaCatalog
 from finql.text_to_sql.validator import SqlRejectedError, validate_sql
 
+logger = structlog.get_logger(__name__)
+
 
 @dataclass(frozen=True)
 class Pipeline:
@@ -35,6 +41,7 @@ class Pipeline:
     llm_engine: AsyncEngine  # finql_llm_reader: runs the generated SQL
     log_sessionmaker: async_sessionmaker[AsyncSession]  # finql_app: writes the audit log
     settings: Settings
+    examples: ExampleSelector | None = None  # dynamic few-shot; None: off
 
 
 @dataclass(frozen=True)
@@ -73,23 +80,68 @@ async def answer_question(
     *,
     request_id: str | None = None,
 ) -> Answer:
-    settings = pipeline.settings
     scope = data_scope(user)
-    log = _AttemptLog(pipeline.log_sessionmaker, user, scope, question, request_id)
-
     try:
         await check_budget(session, user.id, user.daily_token_budget)
     except TokenBudgetExceededError as exc:
+        log = _AttemptLog(pipeline.log_sessionmaker, user, scope, question, request_id)
         await log.write(1, QueryStatus.REJECTED_BUDGET, rejection_reason=exc.message)
         raise
 
+    examples = await select_examples(pipeline, question)
+    log = _AttemptLog(
+        pipeline.log_sessionmaker,
+        user,
+        scope,
+        question,
+        request_id,
+        example_ids=[example.id for example in examples] or None,
+    )
+    return await run_attempts(pipeline, question, scope, examples, log)
+
+
+class AttemptLog(Protocol):
+    async def write(
+        self,
+        attempt: int,
+        status: QueryStatus,
+        *,
+        usage: LLMUsage | None = None,
+        **fields: Any,
+    ) -> int:
+        """Record one attempt (fields: QueryLog columns); returns its id."""
+        ...
+
+
+async def select_examples(pipeline: Pipeline, question: str) -> list[FewShotExample]:
+    """The few-shot examples for the prompt. An embedding outage costs quality, not the answer:
+    the question goes on without examples."""
+    if pipeline.examples is None:
+        return []
+    try:
+        return await pipeline.examples.select(question)
+    except EmbeddingError:
+        logger.warning("few-shot examples skipped: embedding unavailable")
+        return []
+
+
+async def run_attempts(
+    pipeline: Pipeline,
+    question: str,
+    scope: DataScope,
+    examples: Sequence[FewShotExample],
+    log: AttemptLog,
+) -> Answer:
+    """LLM → validator → cost guard → execution, with self-repair. Every attempt is logged.
+    The API and the eval (finql.eval.runner) both answer through this."""
+    settings = pipeline.settings
     previous: PreviousAttempt | None = None
     max_attempts = settings.sql_max_repairs + 1
     for attempt in range(1, max_attempts + 1):
         last_attempt = attempt == max_attempts
 
         try:
-            response = await generate(pipeline.llm, pipeline.catalog, question, previous)
+            response = await generate(pipeline.llm, pipeline.catalog, question, previous, examples)
         except LLMRefusalError as exc:
             await log.write(
                 attempt, QueryStatus.DECLINED, usage=exc.usage, rejection_reason="refusal"
@@ -220,6 +272,7 @@ class _AttemptLog:
     scope: DataScope
     question: str
     request_id: str | None
+    example_ids: list[int] | None = None
 
     async def write(
         self,
@@ -238,6 +291,7 @@ class _AttemptLog:
             status=status,
             prompt_version=PROMPT_VERSION,
             request_id=self.request_id,
+            example_ids=self.example_ids,
             **fields,
         )
         if usage is not None:

@@ -113,17 +113,37 @@ a rendszeres mérés a 4. fázis evalja.
 
 **Cél:** a minőség számokkal mérhető, és a változtatások hatása látható.
 
-- [ ] `eval/datasets/golden.yaml`: 50 kérdés (könnyű, közepes, nehéz; címkék: join, idő, window, aggregáció), elvárt SQL, szerepkör
-- [ ] `eval/datasets/adversarial.yaml`: 20 elutasítandó kérdés
-- [ ] `runner.py`: elvárt és generált SQL futtatása, eredményhalmazok összevetése (sorrend-érzéketlen, ha nincs ORDER BY; numerikus tolerancia)
-- [ ] Metrikák: végrehajtási pontosság, érvényes SQL aránya, elutasítási arány, p50/p95 késleltetés, tokenek kérdésenként
-- [ ] Eredmények az `eval_runs`/`eval_results` táblákba, markdown-riport
-- [ ] `app.sql_examples` + embedding: a 3 leghasonlóbb példa dinamikusan kerül a promptba
-- [ ] Összevetés: v1 prompt few-shot nélkül vs. dinamikus few-shottal → eredmény a README-be
-- [ ] `eval.yml` workflow (kézi indítás, API-kulcs secretből)
+- [x] `eval/datasets/golden.yaml`: 50 kérdés (16 könnyű, 23 közepes, 11 nehéz; címkék: join, idő, window, aggregáció és társaik), elvárt SQL, szerepkör (4 fiókvezetői kérdés)
+- [x] `eval/datasets/adversarial.yaml`: 20 elutasítandó kérdés, hét kategóriában
+- [x] `eval/runner.py`: elvárt és generált SQL futtatása, eredményhalmazok összevetése (sorrend csak rangsornál számít; numerikus tolerancia; oszlopok érték szerint, ADR-007)
+- [x] Metrikák: végrehajtási pontosság, érvényes SQL aránya, elutasítási arány, p50/p95 késleltetés, tokenek kérdésenként
+- [x] Eredmények az `eval_runs`/`eval_results` táblákba, markdown-riport, két futás összevetése (`finql eval compare`)
+- [x] `app.sql_examples` + embedding (Voyage, `voyage-4`): a 3 leghasonlóbb példa dinamikusan kerül a promptba (`finql examples sync`, 28 példa)
+- [ ] Összevetés: v1 prompt few-shot nélkül vs. dinamikus few-shottal → eredmény a README-be (API-kulcsra vár)
+- [x] `eval.yml` workflow (kézi indítás, API-kulcs secretből)
 
 **Kész, ha:** legalább 80% pontosság az arany soron, 100% elutasítás a rosszindulatú soron,
 és a riport bekerült a repóba.
+
+**Állapot:** a harness kész és tesztelt. Az orákulummal (az elvárt SQL-t visszaadó ál-LLM) a
+`small` skálán 50/50 és 20/20, vagyis a kérdéssorok, a hatókörök, az összevetés, a tárolás és a
+riport rendben van. A valódi mérés API-kulcsra vár: `FINQL_ANTHROPIC_API_KEY`, few-shothoz
+`FINQL_VOYAGE_API_KEY` is.
+
+**Tanulságok:**
+- A kérdéssor megírása két korábbi hibát hozott elő, még mielőtt egy modell válaszolt volna.
+  (1) Az LLM-szerepkör UTC-ben futott, így a `booked_at >= '2025-09-01'` két órával később
+  kezdte a hónapot, mint a `booked_date` és a havi összesítő, és a szomszédos partíciót is olvasta.
+  Javítás: `ALTER ROLE … SET timezone = 'Europe/Budapest'`. (2) A seedben a devizaszámláknak
+  nem volt kártyájuk, így a külföldi kereskedőknek egyetlen tranzakciójuk sem volt.
+- Kis adaton a rossz válasz is lehet „helyes”: a `tiny` skálán a 30 és a 90 napon túl késő
+  hitelek száma ugyanannyi, így egy rossz szűrő is átment. A mérés ezért a `small` skálán fut, a
+  `tiny` csak a harness tesztjeire való.
+- Egy arany kérdésnek egy helyes válasza legyen. A „top kereskedők kategóriánként” kétértelmű
+  volt, mert a kereskedőnevek nem egyediek (egy név több üzlet), így név és azonosító szerint mást
+  adott; a kérdés kategóriákra változott. A rangsorok határán nincs holtverseny (ellenőrizve).
+- A few-shot példák a felhasználói üzenetbe kerülnek: a rendszerprompt így bájtra ugyanaz
+  marad, és cache-elhető (ADR-007).
 
 ---
 

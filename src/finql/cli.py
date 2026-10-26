@@ -2,12 +2,16 @@ import asyncio
 import io
 import sys
 import time
-from typing import Annotated
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from finql import __version__
 from finql.core.config import get_settings
+
+if TYPE_CHECKING:
+    from finql.text_to_sql.examples import SyncResult
 
 app = typer.Typer(help="FinQL parancssori eszközök.", no_args_is_help=True)
 db_app = typer.Typer(help="Adatbázis-adminisztráció.", no_args_is_help=True)
@@ -142,3 +146,153 @@ def user_demo() -> None:
         status = "létrehozva" if user.email in created else "már létezett"
         branch = f" ({user.branch_code})" if user.branch_code else ""
         typer.echo(f"  {user.email:<32} {user.role.value}{branch}: {status}")
+
+
+examples_app = typer.Typer(help="Few-shot példák kezelése.", no_args_is_help=True)
+app.add_typer(examples_app, name="examples")
+eval_app = typer.Typer(help="A text-to-SQL minőségének mérése.", no_args_is_help=True)
+app.add_typer(eval_app, name="eval")
+
+
+@examples_app.command("sync")
+def examples_sync(
+    file: Annotated[Path, typer.Option(help="A példák forrásfájlja.")] = Path(
+        "data/sql_examples.yaml"
+    ),
+    check: Annotated[
+        bool, typer.Option(help="Minden példa SQL-je átmegy-e a validátoron, és lefut-e.")
+    ] = True,
+) -> None:
+    """A YAML-fájl példáinak betöltése az app.sql_examples táblába, embeddinggel."""
+    from finql.core.errors import AppError
+    from finql.llm.embeddings import EmbeddingError
+
+    try:
+        result = asyncio.run(_sync_examples(file, check=check))
+    except (AppError, EmbeddingError) as exc:
+        typer.echo(exc.message, err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"Új: {result.added}, módosult: {result.updated}, változatlan: {result.unchanged}, "
+        f"kivezetve: {result.deactivated}"
+    )
+
+
+async def _sync_examples(file: Path, *, check: bool) -> "SyncResult":
+    from finql.core.db import create_engine, create_sessionmaker
+    from finql.llm.embeddings import VoyageEmbedder, build_embedder
+    from finql.text_to_sql.examples import check_example, load_example_file, sync_examples
+    from finql.text_to_sql.schema_context import load_catalog
+
+    settings = get_settings()
+    specs = load_example_file(file)
+    embedder = build_embedder(settings)
+    if embedder is None:
+        typer.echo(
+            "Nincs embedding: FINQL_VOYAGE_API_KEY, vagy FINQL_EMBEDDING_PROVIDER=hashing.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if check:
+        if settings.llm_database_url is None:
+            typer.echo(
+                "Az ellenőrzéshez kell a FINQL_LLM_DATABASE_URL (vagy: --no-check).",
+                err=True,
+            )
+            raise typer.Exit(1)
+        llm_engine = create_engine(settings.llm_database_url.get_secret_value())
+        try:
+            catalog = await load_catalog(llm_engine)
+            for spec in specs:
+                try:
+                    await check_example(spec, engine=llm_engine, catalog=catalog, settings=settings)
+                except Exception:
+                    typer.echo(f"Hibás példa: {spec.question}", err=True)
+                    raise
+        finally:
+            await llm_engine.dispose()
+    engine = create_engine(settings.database_url.get_secret_value())
+    try:
+        return await sync_examples(create_sessionmaker(engine), embedder, specs)
+    finally:
+        if isinstance(embedder, VoyageEmbedder):
+            await embedder.close()
+        await engine.dispose()
+
+
+@eval_app.command("run")
+def eval_run(
+    dataset: Annotated[str, typer.Option(help="golden, adversarial vagy all.")] = "all",
+    llm: Annotated[
+        str,
+        typer.Option(help="anthropic: a valódi modell; oracle: az elvárt SQL (a harness tesztje)."),
+    ] = "anthropic",
+    few_shot: Annotated[
+        int, typer.Option(min=0, max=10, help="Ennyi hasonló példa a promptba (0: nincs).")
+    ] = 0,
+    only: Annotated[
+        list[str] | None, typer.Option(help="Csak ezek a kérdésazonosítók (ismételhető).")
+    ] = None,
+    concurrency: Annotated[int, typer.Option(min=1, max=16, help="Párhuzamos kérdések.")] = 4,
+    label: Annotated[str | None, typer.Option(help="Megjegyzés a futáshoz.")] = None,
+    save: Annotated[bool, typer.Option(help="Eredmények az eval_runs táblába.")] = True,
+) -> None:
+    """Az arany és a rosszindulatú kérdéssor futtatása; riport az eval/reports mappába."""
+    from finql.eval.run import EvalOptions, EvalSetupError, run
+    from finql.eval.runner import DatasetError, Outcome
+
+    if dataset not in ("golden", "adversarial", "all"):
+        raise typer.BadParameter(f"ismeretlen kérdéssor: {dataset}")
+    if llm not in ("anthropic", "oracle"):
+        raise typer.BadParameter(f"ismeretlen LLM: {llm}")
+    options = EvalOptions(
+        datasets=dataset,  # type: ignore[arg-type]  # checked above
+        llm=llm,  # type: ignore[arg-type]
+        few_shot_k=few_shot,
+        only=frozenset(only or ()),
+        concurrency=concurrency,
+        label=label,
+        save=save,
+    )
+
+    def progress(outcome: Outcome) -> None:
+        mark = "ok  " if outcome.passed else "HIBA"
+        typer.echo(
+            f"  {mark} {outcome.dataset:<11} {outcome.question_id:<28} "
+            f"{outcome.status:<20} {outcome.latency_ms / 1000:5.1f} s"
+        )
+
+    try:
+        summary = asyncio.run(run(get_settings(), options, on_outcome=progress))
+    except (EvalSetupError, DatasetError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    metrics = summary.metrics
+    if metrics.accuracy is not None:
+        typer.echo(f"Pontosság: {metrics.golden.passed}/{metrics.golden.total}")
+    if metrics.refusal_rate is not None:
+        typer.echo(f"Elutasítás: {metrics.adversarial.passed}/{metrics.adversarial.total}")
+    if summary.run_id is not None:
+        typer.echo(f"Futás: {summary.run_id}")
+    typer.echo(f"Riport: {summary.report_path}")
+
+
+@eval_app.command("compare")
+def eval_compare(
+    run_a: Annotated[int, typer.Argument(help="Az alap futás azonosítója.")],
+    run_b: Annotated[int, typer.Argument(help="Az összevetett futás azonosítója.")],
+    out: Annotated[Path | None, typer.Option(help="Mentés fájlba (különben a kimenetre).")] = None,
+) -> None:
+    """Két futás összevetése: fő számok, javult és romlott kérdések."""
+    from finql.eval.run import EvalSetupError, compare
+
+    try:
+        report = asyncio.run(compare(get_settings(), run_a, run_b))
+    except EvalSetupError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    if out is None:
+        typer.echo(report)
+    else:
+        out.write_text(report, encoding="utf-8", newline="\n")
+        typer.echo(f"Mentve: {out}")

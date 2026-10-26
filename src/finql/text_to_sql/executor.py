@@ -16,6 +16,7 @@ one user's scope over to the next query.
 import datetime as dt
 import time
 import uuid
+import zoneinfo
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
@@ -29,6 +30,10 @@ from finql.text_to_sql.cost_guard import PlanEstimate, check_estimate, parse_exp
 
 QUERY_CANCELED = "57014"  # statement_timeout
 INSUFFICIENT_PRIVILEGE = "42501"
+
+# The bank's calendar, the session time zone of the LLM role as well (db/roles/001_roles.sql).
+# asyncpg returns timestamptz values in UTC; shown in this zone, a month start is a midnight.
+BANK_TIME_ZONE = zoneinfo.ZoneInfo("Europe/Budapest")
 
 SET_CONTEXT = text(
     """SELECT set_config('app.branch_id', :branch_id, true),
@@ -151,6 +156,8 @@ def _jsonable(value: Any) -> Any:
         if not value.is_finite():  # numeric 'NaN' / 'Infinity' is not valid JSON
             return str(value)
         return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dt.datetime) and value.tzinfo is not None:
+        return value.astimezone(BANK_TIME_ZONE).isoformat()
     if isinstance(value, dt.datetime | dt.date | dt.time):
         return value.isoformat()
     if isinstance(value, dt.timedelta):

@@ -128,3 +128,25 @@ async def test_sql_error_carries_the_database_message(seeded_db: DbUrls) -> None
 
     assert 'column "no_such_column" does not exist' in failed.value.message
     assert failed.value.repairable
+
+
+async def test_date_literals_mean_budapest_midnight(seeded_db: DbUrls) -> None:
+    # Regression: in a UTC session `booked_at >= '2025-09-01'` started the month two hours late,
+    # so the answer disagreed with booked_date and the monthly summary (Budapest calendar).
+    result = await run(
+        seeded_db,
+        """SELECT current_setting('TimeZone') AS tz,
+                  (SELECT count(*) FROM transactions
+                   WHERE booked_at >= '2026-09-01' AND booked_at < '2026-10-01') AS by_timestamp,
+                  (SELECT count(*) FROM transactions
+                   WHERE booked_date >= '2026-09-01' AND booked_date < '2026-10-01') AS by_date,
+                  (SELECT sum(tx_count) FROM monthly_account_summary
+                   WHERE month = '2026-09-01') AS by_summary,
+                  date_trunc('month', timestamptz '2026-09-15 12:00') AS month_start""",
+    )
+
+    ((tz, by_timestamp, by_date, by_summary, month_start),) = result.rows
+    assert tz == "Europe/Budapest"
+    assert by_timestamp == by_date == by_summary > 0
+    # Shown in the bank's time zone: a month start is a midnight, not 22:00 the day before.
+    assert month_start == "2026-09-01T00:00:00+02:00"

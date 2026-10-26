@@ -19,24 +19,38 @@ finql_analytics      NOLOGIN   az analytics nézetek tulajdonosa, SELECT a bank 
 finql_llm_reader     LOGIN     LLM-SQL futtatása: csak SELECT az analytics nézeteken
 ```
 
-```sql
--- db/roles/001_roles.sql (vázlat; a jelszavak env-ből jönnek, nem a repóból)
-CREATE ROLE finql_owner NOLOGIN;
-CREATE ROLE finql_analytics NOLOGIN;            -- nem tulajdonos, nincs BYPASSRLS → az RLS érvényes rá
-CREATE ROLE finql_app LOGIN;
-CREATE ROLE finql_llm_reader LOGIN;
+### Hogyan jönnek létre?
 
+A szerepkörök a **teljes klaszterre** szólnak, nem egy adatbázisra, ezért nem Alembic-migráció
+hozza létre őket (egy `alembic downgrade` sem törölheti őket). Egy egyszeri, adminisztrátori
+lépés teszi ezt meg, ahogy egy bankban is a DBA-k kezelik a szerepköröket:
+
+```bash
+uv run finql db bootstrap     # FINQL_ADMIN_DATABASE_URL-lel; idempotens
+uv run alembic upgrade head   # FINQL_MIGRATION_DATABASE_URL-lel (finql_migrator)
+```
+
+| Lépés | Ki futtatja | Mit csinál |
+|---|---|---|
+| `db/roles/001_roles.sql` | admin (`finql db bootstrap`) | Létrehozza a szerepköröket, és minden futáskor újra rögzíti az attribútumaikat (`NOSUPERUSER … NOBYPASSRLS`). Beállítja a `finql_llm_reader` session-korlátait. Az adatbázis tulajdonosa a `finql_owner` lesz, `CONNECT` joga csak a mi szerepköreinknek van. |
+| Jelszavak | admin (`finql db bootstrap`) | A jelszó a komponens saját kapcsolati URL-jéből jön (`FINQL_DATABASE_URL` → `finql_app` stb.). Minden jelszó egy helyen van megadva, a repóban sehol. |
+| Migrációk | `finql_migrator` | Az `env.py` első lépése `SET ROLE finql_owner`, így minden objektum (az Alembic verziótáblája is) a `finql_owner`-é, bárki futtatja is. |
+
+```sql
+-- db/roles/001_roles.sql (részlet)
 ALTER ROLE finql_llm_reader SET default_transaction_read_only = on;
 ALTER ROLE finql_llm_reader SET statement_timeout = '5s';
 ALTER ROLE finql_llm_reader SET idle_in_transaction_session_timeout = '10s';
 ALTER ROLE finql_llm_reader SET search_path = analytics;
 
-REVOKE ALL ON SCHEMA bank, app FROM PUBLIC;
+-- db/bank/090_grants.sql: táblánként, NEM „ON ALL TABLES IN SCHEMA bank”
 GRANT USAGE ON SCHEMA bank TO finql_analytics;
-GRANT SELECT ON ALL TABLES IN SCHEMA bank TO finql_analytics;
-GRANT USAGE ON SCHEMA analytics TO finql_llm_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA analytics TO finql_llm_reader;   -- nézetek
+GRANT SELECT ON bank.branches, bank.customers, bank.accounts, …, bank.transactions TO finql_analytics;
 ```
+
+**Miért táblánként?** Az `ON ALL TABLES IN SCHEMA` a havi partíciókra is jogot adna. Ha egy
+partíciót közvetlenül kérdezünk le, a szülőtábla RLS-policyja nem érvényesül, csak a partícióé.
+Így a `finql_analytics` csak a szülőtáblát olvashatja, a partíciókat nem (ezt teszt is ellenőrzi).
 
 **Miért kell külön nézettulajdonos (`finql_analytics`)?** A nézet alapesetben a
 tulajdonosa jogaival olvassa az alaptáblákat. Ha a tulajdonos maga a táblatulajdonos
@@ -150,6 +164,10 @@ erDiagram
         char currency PK
         numeric rate_to_huf
     }
+    business_day {
+        bool singleton PK
+        date business_date
+    }
 ```
 
 ### DDL-vázlat (a fontos részletekkel)
@@ -165,20 +183,23 @@ CREATE TABLE bank.transactions (
     transaction_id  bigint GENERATED ALWAYS AS IDENTITY,
     booked_at       timestamptz     NOT NULL,
     account_id      bigint          NOT NULL REFERENCES bank.accounts,
-    branch_id       int             NOT NULL REFERENCES bank.branches,  -- szándékos denormalizálás: RLS + szűrés JOIN nélkül
+    branch_id       int             NOT NULL,  -- szándékos denormalizálás: RLS + szűrés JOIN nélkül
     card_id         bigint          REFERENCES bank.cards,
     merchant_id     bigint          REFERENCES bank.merchants,
     amount          numeric(18, 2)  NOT NULL CHECK (amount <> 0),       -- előjeles: + jóváírás, − terhelés
     currency        char(3)         NOT NULL,
     channel         bank.tx_channel NOT NULL,
     description     text,
-    PRIMARY KEY (transaction_id, booked_at)                             -- a partíciókulcsnak benne kell lennie
+    PRIMARY KEY (transaction_id, booked_at),                            -- a partíciókulcsnak benne kell lennie
+    -- az összetett FK garantálja, hogy a denormalizált branch_id egyezik a számla fiókjával
+    FOREIGN KEY (account_id, branch_id) REFERENCES bank.accounts (account_id, branch_id)
 ) PARTITION BY RANGE (booked_at);
 
--- a partíciókat a seed / egy segédfüggvény hozza létre havonta, pl.:
-CREATE TABLE bank.transactions_2026_01 PARTITION OF bank.transactions
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
 CREATE TABLE bank.transactions_default PARTITION OF bank.transactions DEFAULT;
+
+-- havi partíciók budapesti éjfélhatárokkal (téli és nyári időszámításban is), idempotens:
+SELECT bank.create_transaction_partitions('2024-10-01', '2026-09-30');
+-- → transactions_2026_04: FROM ('2026-03-31 22:00+00') TO ('2026-04-30 22:00+00')
 
 CREATE INDEX ON bank.transactions (account_id, booked_at);
 CREATE INDEX ON bank.transactions (branch_id, booked_at);
@@ -186,6 +207,14 @@ CREATE INDEX ON bank.transactions (merchant_id) WHERE merchant_id IS NOT NULL;
 ```
 
 > Megjegyzés: identity oszlop particionált táblán a PostgreSQL 17 óta támogatott.
+
+További részletek a megvalósításban (`db/bank/`):
+
+- **Enumok** minden zárt értékkészletre (szegmens, csatorna, státuszok, terméktípus): a hibás érték már beszúráskor elbukik, és az LLM-kontextusban pontosan felsorolhatók az értékek.
+- **CHECK-ek az üzleti szabályokra:** magánszemélynek van születési dátuma, cégnek nincs; a szegmens illeszkedik az ügyféltípushoz; az adóazonosító formátuma típusfüggő; `closed` státuszhoz kötelező a `closed_at`; kártyás tétel csak `card` vagy `atm` csatornán lehet.
+- **`bank.business_day`:** egysoros tábla az aktuális üzleti nappal. A késedelem és a „ma” ehhez mérődik, nem a `current_date`-hez, így a szintetikus adatállomány hónapok múlva is ugyanazt mutatja.
+- **`bank.fx_rates`:** minden naptári napra van sor (hétvégén és ünnepnap az előző munkanapé), így a napi JOIN sosem marad üresen.
+- **FK-indexek:** a PostgreSQL nem indexeli automatikusan az idegen kulcsokat, ezért a JOIN-okhoz szükségeseket a `020_indexes.sql` hozza létre.
 
 ### Szemantikai leírások (az LLM ebből tanulja meg a sémát)
 
@@ -356,13 +385,32 @@ gondoskodik róla, hogy a szűrés után is meglegyen a kért elemszám.
 
 ## 7. Szintetikus adatok (seed)
 
-| Skála | Ügyfél | Számla | Tranzakció | Időtáv | Cél |
-|---|---|---|---|---|---|
-| `tiny` | 200 | 500 | 20 000 | 3 hónap | Unit- és integrációs tesztek, CI |
-| `small` | 10 000 | 25 000 | ~2 millió | 24 hónap | Fejlesztés, demó |
-| `large` | 50 000 | 120 000 | ~15 millió | 36 hónap | Teljesítménytesztek, EXPLAIN-küszöbök hangolása |
+```bash
+uv run finql seed --scale small            # --seed 42 az alapértelmezés; --reset újratölt
+```
 
-- Faker `hu_HU`: magyar nevek, városok, IBAN-formátum. Rögzített `seed` a reprodukálhatóságért.
-- Valószerű eloszlások: szegmensenkénti költési szint, hétvégi és ünnepi csúcsok, havi fizetés-jóváírás, ~4% késedelmes hitel.
-- Betöltés `COPY`-val (psycopg 3 `copy()`), nem soronkénti INSERT-tel. A nagy táblák indexei és FK-i a betöltés után készülnek.
-- A szándékosan beépített „történetek” (pl. egy fiók költése Q3-ban 30%-kal nő) ellenőrizhetővé teszik az eval-kérdéseket.
+| Skála | Ügyfél | Számla | Tranzakció | Időtáv | Futásidő* | Cél |
+|---|---|---|---|---|---|---|
+| `tiny` | 200 | ~470 | ~20 000 | 3 hónap | ~1 s | Unit- és integrációs tesztek, CI |
+| `small` | 10 000 | ~24 000 | ~2 millió | 24 hónap | ~55 s | Fejlesztés, demó |
+| `large` | 50 000 | ~120 000 | ~15 millió | 36 hónap | ~7 perc (becslés) | Teljesítménytesztek, EXPLAIN-küszöbök hangolása |
+
+\* Windows-laptop, Docker Desktop, a generálással, az indexépítéssel és a `VACUUM ANALYZE`-zal együtt.
+
+- **Reprodukálható:** rögzített a `seed` és az időszak is. Az utolsó hónap 2026 szeptembere, az üzleti nap 2026-09-30, nem „a tegnapi nap”. Így az eval-kérdések elvárt válaszai nem avulnak el. Minden lustán generált adatfolyam (ügyfelek, kártyák, tranzakciók) saját, a seedből származtatott véletlengenerátort kap, így a kimenet nem függ attól, mit olvastunk ki előbb.
+- **Magyar adatok:** Faker `hu_HU` nevek és cégnevek, valódi fiókvárosok és környékbeli települések, érvényes ellenőrzőszámú IBAN (a nem kiosztott `999` bankkóddal), adóazonosító jel és adószám.
+- **Valószerű eloszlások:** szegmensenként eltérő költési szint és kategóriapreferencia, havi fizetés vagy nyugdíj, csoportos beszedések (a gáz télen drágább), hétvégi és decemberi csúcs, ünnepnapi visszaesés, Zipf-eloszlású kereskedőnépszerűség, annuitásos hiteltörlesztés, évi 4,5%-os árszintemelkedés.
+- **Kalibráció:** a generátor előre kiszámolja a várható tételszámot, és úgy állítja be az aktivitási szintet, hogy a tranzakciók száma a skála céljának ±10%-án belül legyen.
+- **Betöltés `COPY`-val** (psycopg 3), egy tranzakcióban. A `transactions` másodlagos indexeit és FK-it a betöltés előtt eldobja, utána a katalógusból kiolvasott definíciókkal újraépíti (`pg_get_indexdef`, `pg_get_constraintdef`), végül `VACUUM (ANALYZE)` fut. Ha egy sor a default partícióba kerülne, a betöltés hibával leáll.
+
+### Beépített „történetek”
+
+Ezek teszik ellenőrizhetővé az eval-kérdéseket, mert ismert a helyes válasz:
+
+| # | Történet | Melyik kérdést szolgálja |
+|---|---|---|
+| 1 | A **Debreceni fiók** (`DEB01`) kártyás költése az utolsó negyedévben (2026 Q3) 40%-kal nő. A `small` skálán +57%, a második helyezett fióké +16%. | Melyik fiókban nőtt a legjobban a kártyás költés negyedéves összevetésben? |
+| 2 | **2025. márciusi kampány:** az új számlanyitások száma megduplázódik (`small`: 658, a többi hónapban átlagosan ~340). | Havi bontásban hogyan alakult az új számlanyitások száma 2025-ben? |
+| 3 | **Decemberi csúcs:** a kártyás költés ~30%-kal haladja meg a novemberit. A hét legerősebb napjai a péntek és a szombat. | Teljes kártyás forgalom egy adott hónapban, szezonalitás |
+| 4 | **Késedelmes hitelek:** ~4,4% (személyi kölcsön ~7,6%, lakáshitel ~1,8%). Magas kockázati besorolásnál ~5-ször akkora az esély, mint alacsonynál. | A hitelek hány százaléka késik 30/60/90 napnál többet, termékenként? |
+| 5 | **Prémium ügyfelek:** többet költenek, és az étterem, a hotel és az utazás felülreprezentált. | Melyik 10 kereskedőnél költöttek a legtöbbet a prémium ügyfelek? |

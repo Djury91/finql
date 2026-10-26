@@ -38,30 +38,31 @@ finql/
 │   └── img/                       # diagramok, képernyőképek, demó GIF
 │
 ├── db/                            # DB-FIRST rész: kézzel írt, review-zott SQL
-│   ├── roles/                     # 001_roles.sql, 002_grants.sql
-│   ├── bank/                      # 001_types.sql, 002_branches.sql, … 010_transactions.sql, 020_indexes.sql
+│   ├── roles/                     # 001_roles.sql: szerepkörök, DB-tulajdon (`finql db bootstrap` futtatja)
+│   ├── bank/                      # 000_schema … 010_transactions.sql, 020_indexes.sql, 090_grants.sql
 │   ├── analytics/                 # nézetek, materializált nézetek, 090_comments.sql
 │   └── security/                  # app_ctx függvények, RLS policy-k
 │
 ├── migrations/                    # Alembic
-│   ├── env.py                     # include_object: a bank/analytics sémát kihagyja az autogenerate-ből
+│   ├── env.py                     # SET ROLE finql_owner; include_name: a DB-first sémák kimaradnak az autogenerate-ből
 │   ├── script.py.mako
 │   └── versions/
-│       ├── 0001_roles_and_schemas.py      # op.execute(read_sql("db/roles/001_roles.sql"))
-│       ├── 0002_bank_schema.py            # DB-first SQL-fájlok futtatása
-│       ├── 0003_analytics_views.py
-│       ├── 0004_rls.py
-│       └── 0005_app_users.py              # code-first: autogenerate + review
+│       ├── 0001_bank_schema.py            # run_sql_file("bank/…"): DB-first SQL-fájlok futtatása
+│       ├── 0002_analytics_views.py
+│       ├── 0003_rls.py
+│       └── 0004_app_users.py              # code-first: autogenerate + review
 │
 ├── src/finql/
 │   ├── __init__.py
 │   ├── main.py                    # FastAPI app factory, lifespan (pool-ok, katalógus-cache)
 │   ├── health.py                  # /health (liveness), /ready (DB-ping, 503 ha nem elérhető)
-│   ├── cli.py                     # typer: seed, ingest, eval, create-user
+│   ├── cli.py                     # typer: db bootstrap, seed, ingest, eval, create-user
 │   │
 │   ├── core/                      # közös infrastruktúra, nincs benne üzleti logika
 │   │   ├── config.py              # pydantic-settings
 │   │   ├── db.py                  # két engine: app_engine (finql_app), llm_engine (finql_llm_reader)
+│   │   ├── bootstrap.py           # szerepkörök + jelszavak a kapcsolati URL-ekből (adminnal)
+│   │   ├── sql_files.py           # a db/ SQL-fájljainak futtatása Alembicből
 │   │   ├── logging.py             # structlog, request_id
 │   │   ├── security.py            # JWT, jelszó-hash (Argon2)
 │   │   ├── errors.py              # domain kivételek → HTTP-válaszok
@@ -120,7 +121,9 @@ finql/
 │   └── pipelines/                 # adat-pipeline-ok, a CLI-ből indítva
 │       ├── seed/
 │       │   ├── generator.py       # Faker hu_HU, eloszlások, „történetek”
-│       │   ├── loader.py          # COPY, partíciók létrehozása
+│       │   ├── reference.py       # fiókok, termékek, kereskedőkategóriák, ünnepnapok
+│       │   ├── identifiers.py     # IBAN, adóazonosító jel, adószám (érvényes ellenőrzőszámmal)
+│       │   ├── loader.py          # COPY, partíciók, indexek a betöltés után, VACUUM ANALYZE
 │       │   └── scales.py          # tiny / small / large
 │       └── ingest/
 │           ├── loaders.py         # markdown, pdf

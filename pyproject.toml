@@ -6,8 +6,11 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.20.1",
     "asyncpg>=0.32.0",
+    "faker>=40.43.0",
     "fastapi>=0.162.0",
+    "psycopg[binary]>=3.3.6",
     "pydantic-settings>=2.16.1",
     "sqlalchemy[asyncio]>=2.1.6",
     "typer>=0.27.3",
@@ -42,6 +45,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "SIM", "N", "ASYNC", "RUF"]
+# A magyar szövegekben a gondolatjel (–) szándékos, nem elírt kötőjel.
+allowed-confusables = ["–"]
 
 [tool.mypy]
 files = ["src", "tests"]
@@ -63,6 +68,10 @@ asyncio_default_fixture_loop_scope = "function"
 dev = { cmd = "uvicorn finql.main:create_app --factory --reload", help = "Fejlesztői szerver" }
 db-up = { cmd = "docker compose up -d --wait db", help = "Postgres indítása" }
 db-down = { cmd = "docker compose down", help = "Postgres leállítása (az adat megmarad)" }
+db-bootstrap = { cmd = "finql db bootstrap", help = "DB-szerepkörök és jelszavak (adminnal, idempotens)" }
+db-migrate = { cmd = "alembic upgrade head", help = "Migrációk futtatása" }
+seed = { cmd = "finql seed --scale small", help = "Szintetikus banki adatok (small skála)" }
+db-setup = { sequence = ["db-up", "db-bootstrap", "db-migrate", "seed"], help = "Üres gépről betöltött adatbázisig" }
 lint = { cmd = "ruff check .", help = "Lint" }
 format = { cmd = "ruff format .", help = "Formázás" }
 typecheck = { cmd = "mypy", help = "Típusellenőrzés" }

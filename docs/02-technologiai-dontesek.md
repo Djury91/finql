@@ -102,7 +102,13 @@ felépíthető (lásd a 8. fázist).
 - Egy eszköz (Alembic) futtat mindent, így egyetlen verziósor és egyetlen `upgrade head` van.
 
 **Szabály:** az autogenerate a `bank` és `analytics` sémát figyelmen kívül hagyja
-(`include_object` szűrő az `env.py`-ban), különben törölni akarná a „nem modellezett” táblákat.
+(`include_name` szűrő az `env.py`-ban), különben törölni akarná a „nem modellezett” táblákat.
+
+**Kiegészítés (2026-10-26, 1. fázis):** a szerepköröket nem Alembic-migráció hozza létre,
+hanem egy külön, idempotens bootstrap-lépés (`finql db bootstrap`, adminisztrátori kapcsolattal).
+A szerepkör klaszterszintű objektum: egy `alembic downgrade` nem törölheti, és a migrátornak
+sem kell hozzá `CREATEROLE` jog. Az Alembic ezután a jogkorlátozott `finql_migrator`-ral fut,
+`SET ROLE finql_owner` mellett, így minden objektum egyetlen tulajdonosé.
 
 ### ADR-003: PostgreSQL 18 + pgvector, nincs külön vektor-adatbázis
 

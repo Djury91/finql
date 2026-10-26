@@ -100,6 +100,7 @@ finql/
 │   │   ├── validator.py           # sqlglot AST-szabályok
 │   │   ├── cost_guard.py          # EXPLAIN-alapú küszöb
 │   │   ├── executor.py            # read-only tranzakció, set_config, sorlimit
+│   │   ├── demo.py                # példakérdések kézi SQL-lel: ál-LLM API-kulcs nélkül
 │   │   └── schemas.py
 │   │
 │   ├── rag/
@@ -119,8 +120,9 @@ finql/
 │   │
 │   ├── audit/
 │   │   ├── router.py              # GET /audit/queries (auditor)
-│   │   ├── service.py             # log_query(...)
-│   │   └── models.py              # QueryLog
+│   │   ├── service.py             # log_query(...): saját tranzakcióban
+│   │   ├── models.py              # QueryLog
+│   │   └── schemas.py
 │   │
 │   └── pipelines/                 # adat-pipeline-ok, a CLI-ből indítva
 │       ├── seed/

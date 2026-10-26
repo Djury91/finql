@@ -23,6 +23,8 @@ class AppError(Exception):
     status_code = 500
     code = "internal_error"
     message = "Váratlan hiba történt."
+    # Machine-readable context for the client (e.g. the rejected SQL and its log id).
+    details: list[dict[str, Any]] | None = None
 
     def __init__(self, message: str | None = None, *, headers: dict[str, str] | None = None):
         super().__init__(message or self.message)
@@ -68,6 +70,15 @@ class ErrorResponse(BaseModel):
     error: ErrorBody
 
 
+# OpenAPI documentation of the common error responses, for `responses=` on the routes.
+UNAUTHORIZED: dict[int | str, dict[str, Any]] = {
+    401: {"model": ErrorResponse, "description": "Nincs vagy érvénytelen a token"}
+}
+FORBIDDEN: dict[int | str, dict[str, Any]] = {
+    403: {"model": ErrorResponse, "description": "Nincs jogosultság"}
+}
+
+
 # Framework-raised HTTP errors (unknown route, wrong method): stable code + Hungarian message.
 HTTP_ERRORS = {
     400: ("bad_request", "Hibás kérés."),
@@ -99,7 +110,9 @@ def error_response(
 
 async def _app_error(_: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)
-    return error_response(exc.status_code, exc.code, exc.message, headers=exc.headers)
+    return error_response(
+        exc.status_code, exc.code, exc.message, details=exc.details, headers=exc.headers
+    )
 
 
 async def _http_error(_: Request, exc: Exception) -> JSONResponse:

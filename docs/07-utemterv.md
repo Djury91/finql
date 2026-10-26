@@ -80,22 +80,34 @@ integrációs tesztek zöldek. Kézzel írt SQL-lel megválaszolható a [projekt
 
 **Cél:** a fő funkció, a teljes biztonsági lánccal.
 
-- [ ] `llm/client.py` protokoll, `anthropic_client.py`, `fake_client.py`
-- [ ] `llm/usage.py`: tokenek, késleltetés, napi keret ellenőrzése
-- [ ] `schema_context.py`: katalógus betöltése az `analytics` sémából, cache, kompakt szöveges formátum
-- [ ] `prompts/text_to_sql.v1.md`: szerep, szabályok, séma, példák, kimeneti séma
-- [ ] `generator.py`: strukturált kimenet (`sql`, `explanation`, `assumptions`)
-- [ ] `validator.py`: a [biztonsági dokumentum](05-text-to-sql-biztonsag.md) összes szabálya, és legalább 50 rosszindulatú tesztminta
-- [ ] `cost_guard.py`: EXPLAIN-küszöb (a `large` skálán kalibrálva)
-- [ ] `executor.py`: `BEGIN READ ONLY`, `set_config(…, true)`, sorlimit, időmérés
-- [ ] Önjavító ciklus SQL-hibára (max. 2 kör)
-- [ ] `audit`: `QueryLog` modell, append-only jogok, naplózás minden ágon
-- [ ] Végpontok: `POST /query`, `GET /query/history`, `GET /schema`, `GET /audit/queries`
+- [x] `llm/client.py` protokoll, `anthropic_client.py`, `fake_client.py`
+- [x] `llm/usage.py`: tokenek, késleltetés, napi keret ellenőrzése
+- [x] `schema_context.py`: katalógus betöltése az `analytics` sémából, cache, kompakt szöveges formátum
+- [x] `prompts/text_to_sql.v1.md`: szerep, szabályok, séma, példák, kimeneti séma
+- [x] `generator.py`: strukturált kimenet (`sql`, `explanation`, `assumptions`)
+- [x] `validator.py`: a [biztonsági dokumentum](05-text-to-sql-biztonsag.md) összes szabálya, és 79 rosszindulatú tesztminta
+- [x] `cost_guard.py`: EXPLAIN-küszöb (a `large` skálán kalibrálva, ADR-006)
+- [x] `executor.py`: `BEGIN READ ONLY`, `set_config(…, true)`, sorlimit, időmérés
+- [x] Önjavító ciklus SQL-hibára (max. 2 kör), tiltott szándéknál nincs újrapróbálás
+- [x] `audit`: `QueryLog` modell, append-only jogok, naplózás minden ágon
+- [x] Végpontok: `POST /query`, `GET /query/history`, `GET /schema`, `GET /audit/queries`
 
 **Kész, ha:** a példakérdések többsége helyes választ ad, az elutasítandók elutasítva,
 és minden kísérlet megjelenik a `query_log` táblában.
 
----
+**Állapot:** a lánc ál-LLM-mel végig tesztelt (elutasítás, önjavítás, költségőr, időkorlát,
+tokenkeret, napló). A valódi Claude-dal futó ellenőrzés (`uv run poe test-llm`) API-kulcsra vár;
+a rendszeres mérés a 4. fázis evalja.
+
+**Tanulságok:**
+- Az EXPLAIN-költség az RLS miatt félrevezető (a hitelnézet: 16 millió költség, 0,3 s). A becsült
+  köztes sorszám választja szét a jó és a rossz lekérdezést (ADR-006). Mérés nélkül rossz küszöb lett volna.
+- Az SDK `parse()` a `stop_reason` előtt validál: egy refúzió 500-as hibát okozott volna.
+  API-kulcs nélkül pedig `TypeError` jön, nem SDK-hiba. Az elsőt egy mockolt HTTP-teszt fogta meg,
+  a másodikat egy kézi próba; most mindkettőre van teszt.
+- Az írási kísérletek nagy része már az EXPLAIN-nél elbukik (nem frissíthető nézet), ezért a
+  read-only réteget egyszerű, frissíthető nézetekkel kell tesztelni, különben a teszt rossz okból zöld.
+- A naplót külön tranzakcióban kell írni: az elutasítás hibaválasza visszagörgetné.
 
 ## 4. fázis – Eval és dinamikus few-shot
 

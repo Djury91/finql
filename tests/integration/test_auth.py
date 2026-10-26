@@ -20,14 +20,10 @@ from finql.pipelines.seed.loader import SeedError, load
 from finql.pipelines.seed.scales import SCALES
 from tests.helpers import TEST_JWT_SECRET, make_settings
 
+from .api import ADMIN, ANALYST, PASSWORD, PECS_MANAGER, bearer, login
 from .db import DbUrls, alembic_config
 
 pytestmark = pytest.mark.integration
-
-PASSWORD = "Demo-jelszo-2026"
-PECS_MANAGER = "pecs@minta-bank.example"
-ANALYST = "elemzo@minta-bank.example"
-ADMIN = "admin@minta-bank.example"
 
 
 @pytest.fixture(scope="module")
@@ -36,17 +32,6 @@ def client(seeded_db: DbUrls) -> Iterator[TestClient]:
     app = create_app(make_settings(async_url(seeded_db.app)))
     with TestClient(app) as test_client:
         yield test_client
-
-
-def login(client: TestClient, email: str, password: str = PASSWORD) -> str:
-    response = client.post("/auth/token", data={"username": email, "password": password})
-    assert response.status_code == 200, response.text
-    token: str = response.json()["access_token"]
-    return token
-
-
-def bearer(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
 
 
 def set_active(urls: DbUrls, email: str, active: bool) -> None:

@@ -30,6 +30,33 @@ class Settings(BaseSettings):
     # Password of the demo users (`finql user demo`); never used in production.
     demo_password: SecretStr | None = None
 
+    # --- LLM (text-to-SQL) ---
+    # "fake": deterministic answers to the example questions, no API key, no cost (demo, tests).
+    llm_provider: Literal["anthropic", "fake"] = "anthropic"
+    # Unset: the SDK's own lookup (ANTHROPIC_API_KEY, `ant auth login` profile).
+    anthropic_api_key: SecretStr | None = None
+    # ADR-004: Sonnet for SQL generation (speed and cost of an interactive request).
+    llm_model: str = "claude-sonnet-5-5"
+    llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    llm_max_tokens: int = Field(default=16000, gt=0)
+    llm_timeout_seconds: float = Field(default=120, gt=0)
+    # On a safety refusal the API retries the request on a fallback model it picks by category.
+    # Supported by Sonnet 5.5, Opus 5+ and Fable 5.1; turn it off for older models.
+    llm_refusal_fallback: bool = True
+
+    # --- Running LLM-generated SQL (docs/05-text-to-sql-biztonsag.md) ---
+    sql_default_limit: int = Field(default=200, gt=0)
+    sql_max_limit: int = Field(default=1000, gt=0)
+    sql_statement_timeout_ms: int = Field(default=5000, gt=0)
+    # EXPLAIN thresholds, calibrated on the `large` scale (docs/05-text-to-sql-biztonsag.md).
+    # The row estimate of the largest intermediate result is the main one: legitimate queries
+    # stay under ~8 million, joins without a proper condition start at ~70 million. The cost is a
+    # backstop only: row-level security inflates it (the loans view: 16 million, 0.5 s).
+    sql_max_plan_rows: float = Field(default=50_000_000, gt=0)
+    sql_max_cost: float = Field(default=100_000_000, gt=0)
+    # Self-repair rounds after an SQL error (the first attempt not counted).
+    sql_max_repairs: int = Field(default=2, ge=0)
+
     @property
     def json_logs(self) -> bool:
         return self.log_json if self.log_json is not None else self.env != "dev"

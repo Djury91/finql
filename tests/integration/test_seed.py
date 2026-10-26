@@ -39,11 +39,15 @@ def test_every_transaction_sits_in_its_monthly_partition(seeded_db: DbUrls) -> N
         "SELECT tableoid::regclass::text, count(*) FROM bank.transactions GROUP BY 1 ORDER BY 1",
     )
 
-    assert [name for name, _ in rows] == [
-        "bank.transactions_2026_07",
-        "bank.transactions_2026_08",
-        "bank.transactions_2026_09",
+    expected = [
+        f"bank.transactions_{year}_{month:02d}"
+        for year in (2025, 2026)
+        for month in range(1, 13)
+        if TINY.period_start <= date(year, month, 1) <= TINY.end_month
     ]
+
+    assert len(expected) == TINY.months
+    assert [name for name, _ in rows] == expected
 
 
 def test_no_transaction_outside_the_account_lifetime(seeded_db: DbUrls) -> None:

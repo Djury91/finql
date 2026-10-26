@@ -40,16 +40,16 @@ finql/
 ├── db/                            # DB-FIRST rész: kézzel írt, review-zott SQL
 │   ├── roles/                     # 001_roles.sql: szerepkörök, DB-tulajdon (`finql db bootstrap` futtatja)
 │   ├── bank/                      # 000_schema … 010_transactions.sql, 020_indexes.sql, 090_grants.sql
-│   ├── analytics/                 # nézetek, materializált nézetek, 090_comments.sql
-│   └── security/                  # app_ctx függvények, RLS policy-k
+│   ├── analytics/                 # nézetek, havi összesítő, 090_comments.sql, 099_ownership_grants.sql
+│   └── security/                  # 001_app_ctx.sql (session-kontextus), 010_rls.sql (policy-k)
 │
 ├── migrations/                    # Alembic
 │   ├── env.py                     # SET ROLE finql_owner; include_name: a DB-first sémák kimaradnak az autogenerate-ből
 │   ├── script.py.mako
 │   └── versions/
 │       ├── 0001_bank_schema.py            # run_sql_file("bank/…"): DB-first SQL-fájlok futtatása
-│       ├── 0002_analytics_views.py
-│       ├── 0003_rls.py
+│       ├── 0002_rls.py                    # app_ctx + policy-k (a nézetek már ezekre épülnek)
+│       ├── 0003_analytics_views.py
 │       └── 0004_app_users.py              # code-first: autogenerate + review
 │
 ├── src/finql/
@@ -150,7 +150,8 @@ finql/
     │   ├── rag/test_chunking.py
     │   └── …
     └── integration/
-        ├── test_rls.py            # fiókvezető csak a sajátját látja, kontextus nélkül 0 sor
+        ├── test_security.py       # RLS (saját fiók / minden fiók / kontextus nélkül 0 sor), írás, PII
+        ├── test_analytics.py      # példakérdések, leírások teljessége, konzisztencia
         ├── test_readonly.py       # írás az llm_reader szerepkörrel → hiba
         ├── test_query_api.py
         └── test_hybrid_search.py

@@ -74,6 +74,8 @@ IDENTITY_COLUMNS = {
     "loans": "loan_id",
 }
 ALL_TABLES = (*COLUMNS, "business_day")
+# Derived from the loaded rows (migration 0003); refreshed at the end of every load.
+MATERIALIZED_VIEWS = ("monthly_account_summary",)
 PROGRESS_EVERY = 500_000
 
 Progress = Callable[[str], Any]
@@ -139,12 +141,19 @@ def load(
         if stray:
             raise SeedError(f"{stray} tranzakció a default partícióba került (hiányzó partíció).")
 
+        materialized = _existing_materialized_views(conn)
+        for view in materialized:
+            progress(f"Materializált nézet frissítése: {view}…")
+            conn.execute(
+                sql.SQL("REFRESH MATERIALIZED VIEW {}").format(sql.Identifier("bank", view))
+            )
+
     # VACUUM cannot run in a transaction block. It also sets the visibility map, so the fresh
     # tables are ready for index-only scans.
     progress("VACUUM ANALYZE…")
     with psycopg.connect(conninfo, autocommit=True) as conn:
         conn.execute("SET ROLE finql_owner")
-        for table in ALL_TABLES:
+        for table in (*ALL_TABLES, *materialized):
             conn.execute(sql.SQL("VACUUM (ANALYZE) {}").format(sql.Identifier("bank", table)))
     return counts
 
@@ -152,6 +161,15 @@ def load(
 def _scalar(conn: psycopg.Connection[Any], query: str) -> Any:
     row = conn.execute(query).fetchone()
     return row[0] if row else None
+
+
+def _existing_materialized_views(conn: psycopg.Connection[Any]) -> list[str]:
+    """The seed also works on a database migrated only up to the bank schema."""
+    return [
+        view
+        for view in MATERIALIZED_VIEWS
+        if _scalar(conn, f"SELECT to_regclass('bank.{view}') IS NOT NULL")
+    ]
 
 
 def _has_data(conn: psycopg.Connection[Any]) -> bool:

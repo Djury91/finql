@@ -46,10 +46,11 @@ Ryuk-konténere Docker Desktopon nem indul el időben (→ Windows-on kikapcsolv
 - [x] Alembic-migrációk, amelyek az SQL-fájlokat futtatják. `env.py`: `SET ROLE finql_owner`, `include_name` szűrő.
 - [x] `pipelines/seed`: Faker `hu_HU`, skálák (`tiny`/`small`/`large`), rögzített seed, beépített „történetek”
 - [x] Betöltés `COPY`-val, indexek a betöltés után, `ANALYZE` (`small`: ~55 s)
-- [ ] `db/analytics`: nézetek PII nélkül, `amount_huf`, `dpd_bucket`, materializált havi összesítő
-- [ ] `COMMENT ON` minden nézetre és oszlopra (ebből lesz az LLM-kontextus)
-- [ ] `db/security`: `app_ctx` függvények, RLS policy-k, nézettulajdonos `finql_analytics`
-- [ ] Integrációs tesztek: RLS (saját fiók, összes fiók, kontextus nélkül 0 sor), read-only, PII-hozzáférés tiltva
+- [x] `db/analytics`: nézetek PII nélkül, `amount_huf`, `dpd_bucket`, materializált havi összesítő (fiókra szűrő nézet mögött)
+- [x] `COMMENT ON` minden nézetre és oszlopra (ebből lesz az LLM-kontextus)
+- [x] `db/security`: `app_ctx` függvények, RLS policy-k, nézettulajdonos `finql_analytics`
+- [x] Integrációs tesztek: RLS (saját fiók, összes fiók, kontextus nélkül 0 sor), read-only, PII-hozzáférés tiltva
+- [x] A projektterv példakérdései kézzel írt SQL-lel, az LLM-szerepkörrel futtatva (`small`: mind 200 ms alatt)
 
 Két PR-ban: (1) séma, szerepkörök, seed; (2) nézetek, RLS, biztonsági tesztek.
 

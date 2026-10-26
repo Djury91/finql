@@ -27,7 +27,8 @@ class Scale:
 
 
 SCALES = {
-    "tiny": Scale("tiny", customers=200, transactions=20_000, months=3, branches=6, merchants=150),
+    # 15 months: enough for "last September" and quarter-over-quarter questions in the tests.
+    "tiny": Scale("tiny", customers=200, transactions=30_000, months=15, branches=6, merchants=150),
     "small": Scale(
         "small", customers=10_000, transactions=2_000_000, months=24, branches=20, merchants=600
     ),

@@ -339,9 +339,21 @@ kerülheti meg az RLS-t, és az LLM-szerepkör csak az `analytics` és az `app_c
 
 ## 6. `app` séma (code-first, SQLAlchemy)
 
+A séma és a jogok SQL-ben vannak (`db/app/000_schema.sql`): a `finql_app` alapértelmezett jogot
+(`ALTER DEFAULT PRIVILEGES`) kap minden új táblára. A táblákat a modellekből az Alembic
+autogenerate hozza létre, review után. Egy teszt (`alembic check`) jelzi, ha egy modell
+migráció nélkül változott.
+
+**Hivatkozás a DB-first sémára:** az `app.users.branch_id` FK-val mutat a `bank.branches`-re.
+A modellben a `bank.branches` csak egy egyoszlopos csonk (`core/base_model.py`), amelyet az
+`env.py` `include_object` szűrője kihagy az autogenerate-ből. Emiatt a seed a fiókokat
+nem `TRUNCATE`-tel, hanem upserttel tölti újra. A `TRUNCATE … CASCADE` ugyanis a
+felhasználókat is törölné, és ha egy kisebb skála kihagyna egy fiókot, amelyre felhasználó
+hivatkozik, a seed érthető hibával leáll.
+
 | Tábla | Fő oszlopok | Megjegyzés |
 |---|---|---|
-| `users` | `id uuid PK`, `email UNIQUE`, `password_hash`, `full_name`, `role` (enum), `branch_id NULL`, `is_active`, `daily_token_budget`, `created_at` | `branch_id` csak `branch_manager` esetén kötelező (CHECK) |
+| `users` | `id uuid PK`, `email UNIQUE`, `password_hash`, `full_name`, `role` (enum), `branch_id NULL`, `is_active`, `daily_token_budget`, `created_at` | `branch_id` csak `branch_manager` esetén kötelező (CHECK); FK a `bank.branches`-re (code-first → DB-first); az e-mail kisbetűsen tárolva (CHECK) |
 | `conversations` | `id`, `user_id FK`, `title`, `created_at`, `updated_at` | |
 | `messages` | `id`, `conversation_id FK`, `role` (user/assistant/tool), `content jsonb`, `model`, `input_tokens`, `output_tokens`, `latency_ms`, `created_at` | Az eszközhívások is itt vannak |
 | `query_log` | `id bigint identity`, `user_id`, `message_id NULL`, `question`, `generated_sql`, `executed_sql`, `status` (enum), `rejection_reason`, `explain_cost`, `row_count`, `duration_ms`, `model`, `input_tokens`, `output_tokens`, `attempt`, `created_at` | **Append-only:** `finql_app` csak `INSERT` és `SELECT` joggal |

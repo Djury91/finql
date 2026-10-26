@@ -41,7 +41,8 @@ finql/
 │   ├── roles/                     # 001_roles.sql: szerepkörök, DB-tulajdon (`finql db bootstrap` futtatja)
 │   ├── bank/                      # 000_schema … 010_transactions.sql, 020_indexes.sql, 090_grants.sql
 │   ├── analytics/                 # nézetek, havi összesítő, 090_comments.sql, 099_ownership_grants.sql
-│   └── security/                  # 001_app_ctx.sql (session-kontextus), 010_rls.sql (policy-k)
+│   ├── security/                  # 001_app_ctx.sql (session-kontextus), 010_rls.sql (policy-k)
+│   └── app/                       # 000_schema.sql: az app séma és a finql_app alapjogai
 │
 ├── migrations/                    # Alembic
 │   ├── env.py                     # SET ROLE finql_owner; include_name: a DB-first sémák kimaradnak az autogenerate-ből
@@ -50,13 +51,14 @@ finql/
 │       ├── 0001_bank_schema.py            # run_sql_file("bank/…"): DB-first SQL-fájlok futtatása
 │       ├── 0002_rls.py                    # app_ctx + policy-k (a nézetek már ezekre épülnek)
 │       ├── 0003_analytics_views.py
-│       └── 0004_app_users.py              # code-first: autogenerate + review
+│       └── 0004_app_schema_and_users.py   # code-first: autogenerate + review
 │
 ├── src/finql/
 │   ├── __init__.py
 │   ├── main.py                    # FastAPI app factory, lifespan (pool-ok, katalógus-cache)
 │   ├── health.py                  # /health (liveness), /ready (DB-ping, 503 ha nem elérhető)
-│   ├── cli.py                     # typer: db bootstrap, seed, ingest, eval, create-user
+│   ├── cli.py                     # typer: db bootstrap, seed, user create/demo, ingest, eval
+│   ├── models.py                  # minden ORM-modul egy helyen (Alembic target_metadata)
 │   │
 │   ├── core/                      # közös infrastruktúra, nincs benne üzleti logika
 │   │   ├── config.py              # pydantic-settings
@@ -64,7 +66,8 @@ finql/
 │   │   ├── bootstrap.py           # szerepkörök + jelszavak a kapcsolati URL-ekből (adminnal)
 │   │   ├── sql_files.py           # a db/ SQL-fájljainak futtatása Alembicből
 │   │   ├── logging.py             # structlog, request_id
-│   │   ├── security.py            # JWT, jelszó-hash (Argon2)
+│   │   ├── security.py            # JWT, jelszó-hash (Argon2id)
+│   │   ├── deps.py                # közös függőségek: DbSession, AppSettings
 │   │   ├── errors.py              # domain kivételek → HTTP-válaszok
 │   │   └── base_model.py          # SQLAlchemy DeclarativeBase (schema="app")
 │   │
@@ -73,7 +76,8 @@ finql/
 │   │   ├── service.py
 │   │   ├── models.py              # User
 │   │   ├── schemas.py             # TokenResponse, UserOut
-│   │   └── dependencies.py        # get_current_user, require_role(...)
+│   │   ├── dependencies.py        # get_current_user, require_role(...)
+│   │   └── admin.py               # felhasználókezelés a CLI-ből (fiókkód → branch_id)
 │   │
 │   ├── llm/                       # provider-független LLM-réteg
 │   │   ├── client.py              # LLMClient protokoll

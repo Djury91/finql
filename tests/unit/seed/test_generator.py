@@ -100,3 +100,14 @@ def test_growth_story_branch_leads_quarter_over_quarter() -> None:
     leader = max(growth, key=lambda b: growth[b])
 
     assert codes[leader] == GROWTH_STORY_BRANCH
+
+
+def test_foreign_currency_accounts_spend_at_foreign_merchants() -> None:
+    # Regression: personal FX accounts had no card, so foreign merchants had no transactions and
+    # a question about card spend abroad had an empty answer.
+    generator, rows = tiny()
+    foreign = {row[0] for row in generator.merchant_rows() if row[5] != "HU"}
+    fx_card_rows = [row for row in rows if row[7] == "card" and row[6] != "HUF"]
+
+    assert fx_card_rows
+    assert {row[4] for row in fx_card_rows} <= foreign

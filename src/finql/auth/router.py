@@ -1,4 +1,4 @@
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordRequestForm
@@ -8,16 +8,9 @@ from finql.auth.dependencies import CurrentUser, require_role
 from finql.auth.models import User, UserRole
 from finql.auth.schemas import TokenResponse, UserOut
 from finql.core.deps import AppSettings, DbSession
-from finql.core.errors import ErrorResponse
+from finql.core.errors import FORBIDDEN, UNAUTHORIZED
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-UNAUTHORIZED: dict[int | str, dict[str, Any]] = {
-    401: {"model": ErrorResponse, "description": "Nincs vagy érvénytelen a token"}
-}
-FORBIDDEN: dict[int | str, dict[str, Any]] = {
-    403: {"model": ErrorResponse, "description": "Nincs jogosultság"}
-}
 
 
 @router.post("/token", responses=UNAUTHORIZED)

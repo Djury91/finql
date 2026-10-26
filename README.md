@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** 2. fázis kész (FastAPI-gerinc, bejelentkezés, szerepkörök). Következik: 3. fázis, Text-to-SQL. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 3. fázis kész (Text-to-SQL a teljes biztonsági lánccal: validátor, költségőr, read-only futtatás, napló). Következik: 4. fázis, eval és few-shot. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 
@@ -66,10 +66,24 @@ Bejelentkezés: a `/docs` oldalon az **Authorize** gombbal, pl. `pecs@minta-bank
 (pécsi fiókvezető) vagy `elemzo@minta-bank.example` (elemző) és a `FINQL_DEMO_PASSWORD`.
 Utána a `GET /auth/me` a szerepkört és a fiókot adja vissza.
 
+### Kérdezés (text-to-SQL)
+
+A `POST /query` törzse: `{"question": "Hány 90+ napos késedelmes hitelünk van?"}`. A válasz a
+futtatott SQL, a magyarázat, a feltételezések és az eredménytábla. Ugyanaz a kérdés az elemzőnek
+az egész bankra, a pécsi fiókvezetőnek csak a pécsi fiókra felel (Row-Level Security).
+
+- **Claude-dal:** `FINQL_ANTHROPIC_API_KEY` a `.env`-ben (alapmodell: `claude-sonnet-5-5`).
+- **API-kulcs nélkül:** `FINQL_LLM_PROVIDER=fake` – a [projektterv](docs/01-projekt-terv.md)
+  példakérdéseire kézzel írt SQL-lel válaszol, a biztonsági lánc ugyanaz.
+
+Minden kísérlet (az elutasítottak is) a `query_log` táblába kerül: `GET /query/history` (saját),
+`GET /audit/queries` (auditor). Az LLM által látott séma: `GET /schema`.
+
 | Parancs | Mit csinál |
 |---|---|
 | `uv run poe check` | Lint, formázás, típusellenőrzés, tesztek (ugyanaz, mint a CI) |
 | `uv run poe test-unit` | Tesztek Docker nélkül |
+| `uv run poe test-llm` | Néhány kérdés a valódi Claude-dal (API-kulcs kell, pár cent) |
 | `uv run poe db-down` | Postgres leállítása (az adat megmarad) |
 | `uv run pre-commit install` | Git-hookok bekapcsolása |
 

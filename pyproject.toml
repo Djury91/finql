@@ -7,6 +7,7 @@ license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "alembic>=1.20.1",
+    "anthropic>=2.3.0",
     "argon2-cffi>=25.1.0",
     "asyncpg>=0.32.0",
     "faker>=40.43.0",
@@ -17,6 +18,7 @@ dependencies = [
     "pyjwt>=2.15.1",
     "python-multipart>=0.0.32",
     "sqlalchemy[asyncio]>=2.1.6",
+    "sqlglot>=30.25.0",
     "structlog>=26.1.0",
     "typer>=0.27.3",
     "uvicorn[standard]>=0.54.0",
@@ -65,7 +67,10 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "-ra"]
-markers = ["integration: valódi Postgres-t indít (Docker kell hozzá)"]
+markers = [
+    "integration: valódi Postgres-t indít (Docker kell hozzá)",
+    "llm: a valódi Anthropic API-t hívja (API-kulcs kell, pénzbe kerül)",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
@@ -82,4 +87,5 @@ format = { cmd = "ruff format .", help = "Formázás" }
 typecheck = { cmd = "mypy", help = "Típusellenőrzés" }
 test = { cmd = "pytest", help = "Minden teszt" }
 test-unit = { cmd = "pytest -m \"not integration\"", help = "Tesztek Docker nélkül" }
+test-llm = { cmd = "pytest -m llm", help = "A valódi Claude-dal futó tesztek (API-kulcs kell)" }
 check = { sequence = ["lint", { cmd = "ruff format --check ." }, "typecheck", "test"], help = "Amit a CI is futtat" }

@@ -36,6 +36,63 @@ A **függvény-engedélylista** a legfontosabb finomság: egy tiltólistából m
 valami, és egy `SELECT set_config('app.branch_id', '7', true)` a lekérdezés közepén
 átírhatná az RLS-kontextust.
 
+A megvalósításban (`text_to_sql/validator.py`) ezen felül:
+
+- A tiltott csomópontokat **a teljes fában** keressük, nem csak a gyökérben: egy
+  `WITH d AS (DELETE … RETURNING *) SELECT …` gyökere SELECT, mégis töröl.
+- Paraméter (`$1`, `:x`) nem lehet az SQL-ben; sémanévvel minősített függvényhívás
+  (`pg_catalog.set_config(…)`) sem; és a típuskonverzió céltípusa is engedélylistás
+  (a `'bank.customers'::regclass` a katalógust tapogatná).
+- Az engedélyezett nézetek listája ugyanabból a katalógusból jön, amelyből a prompt sémaleírása
+  (`schema_context.py`): amit az LLM lát, pontosan azt kérdezheti le.
+- **Javítható vagy tiltott?** Elírt vagy kitalált nézet, nem engedélyezett, de ártalmatlan függvény
+  és szintaxishiba esetén az LLM kap egy második esélyt (a hibaüzenettel). Írási kísérlet,
+  rendszerkatalógus, más séma, `set_config`-féle függvény, `SELECT INTO`, zárolás és paraméter
+  esetén nincs újrapróbálás: az tiltott szándék, nem elírás.
+- A sqlglot az újragenerálásnál átírhatja a lekérdezést (`now()` → `CURRENT_TIMESTAMP`, cast a
+  `round(…)` köré). Egy integrációs teszt ellenőrzi, hogy a példakérdéseknél az eredmény változatlan.
+- 79 rosszindulatú tesztminta kategóriánként (írás, DDL, parancsok, session-vezérlés, rejtett
+  írás CTE-ben, RLS-kontextus, rendszerkatalógus, PII-sémák, veszélyes függvények, katalógus-castok,
+  paraméterek), mindegyiknél az elvárt elutasítási okkal.
+
+## A költségőr kalibrálása (3. réteg)
+
+Az EXPLAIN két számot ad: a teljes becsült **költséget** és a terv legnagyobb **köztes
+sorszámát**. A küszöböket a `large` skálán (50 000 ügyfél, 15 millió tranzakció) mértük, az
+LLM-szerepkörrel, „minden fiók” hatókörrel:
+
+| Lekérdezés | Becsült költség | Legnagyobb köztes sorszám | Futásidő |
+|---|---:|---:|---:|
+| Aktív ügyfelek szegmensenként | 422 ezer | 42 ezer | 70 ms |
+| Kártyás forgalom tavaly szeptemberben | 324 ezer | 545 ezer | 1,5 s |
+| 90+ napos késedelmes hitelek száma | **16 millió** | 64 ezer | 0,3 s |
+| Teljes forgalom fiókonként, minden időszak (teljes tábla) | 368 ezer | 3,3 millió | 4,5 s |
+| Ügyfelenkénti költés, 3 hónap, top 100 | 354 ezer | 1,6 millió | 3,5 s |
+| ROSSZ: tranzakciók × számlák (nincs JOIN-feltétel) | 2,1 milliárd | 294 milliárd | > 15 s |
+| ROSSZ: tranzakciók × tranzakciók, egy hónap | 693 millió | 33 milliárd | > 15 s |
+| ROSSZ: `generate_series(1, 10⁹)` | 12,5 millió | 1 milliárd | > 15 s |
+| ROSSZ: tranzakciók önmagukkal, számla szerint | 9 millió | 482 millió | (csak EXPLAIN) |
+| ROSSZ: tranzakciók × árfolyamok, csak deviza szerint | 2,1 millió | 72 millió | (csak EXPLAIN) |
+
+A költség átfed: a hitelnézet RLS-feltételét a tervező minden törlesztőrészletre beárazza, pedig
+futáskor rövidre zár. A **sorszám viszont éles határt húz** (legitim: ≤ ~8 millió, rossz: ≥ 72
+millió). Küszöbök: **50 millió sor** (fő szabály) és **100 millió költség** (hátvéd), lásd ADR-006.
+Kisebb adaton (`small`) néhány rossz JOIN a küszöb alatt marad; azokat az 5 s-os időkorlát állítja
+meg (6. réteg).
+
+**Mellékes lelet:** egy rossz JOIN a Docker alapértelmezett 64 MB-os `/dev/shm`-jét is kimerítette
+(„could not resize shared memory segment … No space left on device”), mert a párhuzamos hash JOIN
+ott osztja meg a memóriát. A Compose-ban ezért `shm_size: 512mb`.
+
+## Ismert korlátok
+
+- **„A legutóbbi N tranzakció” minden fiókra:** a `booked_at` önmagában nincs indexelve (csak
+  `(account_id, booked_at)` és `(branch_id, booked_at)`), így a `large` skálán az elemzői
+  `ORDER BY booked_at DESC LIMIT 200` ~7,7 s, és időtúllépéssel leáll. Fiókszinten 1,5 s.
+  Egy `(booked_at)` index megoldaná; akkor érdemes felvenni, ha az eval szerint gyakori kérdés.
+- **A DB önmagában nem zárja ki a kontextus kitágítását:** lásd [04 – Adatbázis](04-adatbazis.md),
+  RLS. Ezt a validátor függvény-engedélylistája zárja ki.
+
 ## Fenyegetésmodell
 
 | Támadás / hiba | Példa | Melyik réteg állítja meg |
@@ -53,6 +110,7 @@ valami, és egy `SELECT set_config('app.branch_id', '7', true)` a lekérdezés k
 
 ## Tesztelés
 
-- **Unit:** a validátorhoz paraméterezett tesztek, legalább 50 rosszindulatú SQL-mintával (`tests/unit/text_to_sql/test_validator.py`).
-- **Integráció:** valódi Postgres (testcontainers). Fiókvezetőként futtatott lekérdezés csak a saját fiók sorait adja vissza. Kontextus nélkül 0 sort ad. Írási kísérletnél `ReadOnlySqlTransaction` hiba jön.
+- **Unit:** a validátorhoz paraméterezett tesztek, 79 rosszindulatú SQL-mintával (`tests/unit/text_to_sql/test_validator.py`). Az Anthropic-kliens egy mockolt HTTP-transzporton: kérésforma, refúzió, csonka válasz, hiányzó API-kulcs.
+- **Integráció:** valódi Postgres (testcontainers), ál-LLM-mel (`FakeLLMClient`). Fiókvezetőként futtatott lekérdezés csak a saját fiók sorait adja vissza. Kontextus nélkül 0 sort ad. Írási kísérletnél a validátor nélkül is `ReadOnlySqlTransaction` vagy jogosultsági hiba jön. A tiltott SQL nem kap második esélyt, az elírás igen; minden kísérlet a naplóba kerül; a napló az alkalmazás szerepkörével nem módosítható és nem törölhető (`test_query_api.py`, `test_executor.py`).
+- **Élő:** néhány kérdés a valódi Claude-dal (`uv run poe test-llm`, API-kulcs nélkül kimarad).
 - **Eval:** a rosszindulatú kérdéssor (`eval/datasets/adversarial.yaml`) a teljes folyamaton fut, valódi LLM-mel. A célérték 100% elutasítás vagy üres eredmény.

@@ -7,6 +7,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?add meg a POSTGRES_PASSWORD-ot a .env-ben}
       POSTGRES_DB: ${POSTGRES_DB:-finql}
+    # A párhuzamos lekérdezések a /dev/shm-ben osztják meg a hash-táblákat. A Docker alapértéke
+    # (64 MB) a large skálán egy nagy JOIN-nál „No space left on device” hibát adott.
+    shm_size: 512mb
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:

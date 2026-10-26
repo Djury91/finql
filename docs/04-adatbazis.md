@@ -356,14 +356,20 @@ hivatkozik, a seed érthető hibával leáll.
 | `users` | `id uuid PK`, `email UNIQUE`, `password_hash`, `full_name`, `role` (enum), `branch_id NULL`, `is_active`, `daily_token_budget`, `created_at` | `branch_id` csak `branch_manager` esetén kötelező (CHECK); FK a `bank.branches`-re (code-first → DB-first); az e-mail kisbetűsen tárolva (CHECK) |
 | `conversations` | `id`, `user_id FK`, `title`, `created_at`, `updated_at` | |
 | `messages` | `id`, `conversation_id FK`, `role` (user/assistant/tool), `content jsonb`, `model`, `input_tokens`, `output_tokens`, `latency_ms`, `created_at` | Az eszközhívások is itt vannak |
-| `query_log` | `id bigint identity`, `user_id`, `message_id NULL`, `question`, `generated_sql`, `executed_sql`, `status` (enum), `rejection_reason`, `explain_cost`, `row_count`, `duration_ms`, `model`, `input_tokens`, `output_tokens`, `attempt`, `created_at` | **Append-only:** `finql_app` csak `INSERT` és `SELECT` joggal |
+| `query_log` | `id bigint identity`, `user_id`, `scope`, `branch_id`, `question`, `attempt`, `status` (enum), `generated_sql`, `executed_sql`, `rejection_reason`, `explain_cost`, `row_count`, `duration_ms`, `model`, `prompt_version`, `input_tokens`, `output_tokens`, `llm_latency_ms`, `request_id`, `created_at` | **Append-only:** `finql_app` csak `INSERT` és `SELECT` joggal (`db/app/010_query_log.sql`). Kísérletenként egy sor; a `scope` és a `branch_id` a futáskori hatókör. A `message_id` a 6. fázisban jön a `messages` táblával. |
 | `documents` | `id`, `title`, `source_path UNIQUE`, `doc_type`, `min_role`, `content_hash`, `version`, `ingested_at` | A hash alapján ismerjük fel a változást |
 | `document_chunks` | `id`, `document_id FK ON DELETE CASCADE`, `chunk_index`, `content`, `token_count`, `embedding vector(1024)`, `embedding_model`, `tsv tsvector GENERATED`, `metadata jsonb` | HNSW- és GIN-index |
 | `sql_examples` | `id`, `question`, `sql`, `tags text[]`, `embedding vector(1024)`, `is_active` | Dinamikus few-shot példák |
 | `eval_runs` / `eval_results` | futás: modell, promptverzió, pontosság; eredmény: kérdés-ID, helyes-e, SQL, hiba | Az eval-trendek az adatbázisban követhetők |
 
-`query_log.status` értékei: `ok`, `rejected_validation`, `rejected_cost`, `sql_error`,
-`timeout`, `llm_error`.
+`query_log.status` értékei: `ok`, `declined` (az LLM nem írt SQL-t, mert a kérdés nem
+válaszolható meg, vagy biztonsági okból elutasította), `rejected_validation`, `rejected_cost`,
+`rejected_budget` (elfogyott a napi tokenkeret), `sql_error`, `timeout`, `llm_error`.
+
+A napi tokenkeretet (`users.daily_token_budget`) ugyanebből a táblából számoljuk: a felhasználó
+aznapi (budapesti naptári nap) összes input- és outputtokenje. A naplóírás saját tranzakcióban
+fut, mert az elutasított kérdés hibaválasza visszagörgeti a kérés tranzakcióját, a naplósornak
+viszont pont akkor kell megmaradnia.
 
 ```python
 # src/finql/rag/models.py (vázlat)
@@ -432,7 +438,7 @@ uv run finql seed --scale small            # --seed 42 az alapértelmezés; --re
 |---|---|---|---|---|---|---|
 | `tiny` | 200 | ~470 | ~30 000 | 15 hónap | ~1 s | Unit- és integrációs tesztek, CI (15 hónap: legyen „tavaly szeptember” és negyedéves összevetés) |
 | `small` | 10 000 | ~24 000 | ~2 millió | 24 hónap | ~55 s | Fejlesztés, demó |
-| `large` | 50 000 | ~120 000 | ~15 millió | 36 hónap | ~7 perc (becslés) | Teljesítménytesztek, EXPLAIN-küszöbök hangolása |
+| `large` | 50 000 | ~120 000 | ~15 millió | 36 hónap | ~9 perc | Teljesítménytesztek, EXPLAIN-küszöbök hangolása |
 
 \* Windows-laptop, Docker Desktop, a generálással, az indexépítéssel és a `VACUUM ANALYZE`-zal együtt.
 

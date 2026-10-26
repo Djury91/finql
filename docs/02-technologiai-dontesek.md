@@ -122,12 +122,40 @@ végzi. Egy kevesebb rendszer, amit üzemeltetni kell.
 
 ### ADR-004: LLM-provider absztrakció, Claude az alapértelmezett
 
-- `LLMClient` protokoll (`generate`, `generate_structured`, `stream`, `tool_call`). Az implementáció cserélhető (Anthropic, helyi Ollama, mock a tesztekhez).
+- `LLMClient` protokoll (`generate_structured` a 3. fázistól; `stream`, `tool_call` a 6. fázisban). Az implementáció cserélhető (Anthropic, helyi Ollama, mock a tesztekhez).
 - Alapértelmezett modellek (környezeti változóból felülírhatók):
   - SQL-generálás és agent: `claude-sonnet-5-5`
   - Olcsó feladatok (routing, összefoglalás, címadás): `claude-haiku-5-5`
 - **Embedding:** `Embedder` protokoll. Alapértelmezés a Voyage AI API (könnyű Docker-image), alternatívaként helyi `bge-m3` (többnyelvű, jól kezeli a magyart, offline is fut). Mindkettő 1024 dimenziós. A chunk mellé eltároljuk a modell nevét, mert modellváltáskor újra kell embeddingelni.
 - A tesztek determinisztikus mock LLM-mel futnak. Valódi API-hívás csak az eval futásban van.
+
+**Megvalósítás (3. fázis):**
+- `generate_structured` strukturált kimenettel: a Pydantic-modellből JSON-séma megy az
+  `output_config.format`-ba, így a válasz mindig a sémának megfelelő JSON. A `messages.parse()`
+  helyett `create()`: a `parse()` már a `stop_reason` vizsgálata előtt validálna, és egy
+  biztonsági elutasítás (`refusal`) vagy egy csonka válasz így JSON-hibaként, 500-zal jönne vissza.
+  Ezt egy unit teszt fogta meg.
+- Biztonsági elutasításnál a szerveroldali tartalék (`fallbacks: "default"`) automatikusan egy
+  másik modellel próbálja újra; a naplóba az a modell kerül, amelyik válaszolt.
+- `effort: medium` kifejezetten beállítva (Sonnet 5.5-ön az alapérték `high`), a rendszerprompt
+  (szabályok + séma) prompt-cache-elve: minden kérdésnél ugyanaz.
+- Az önjavító kör **új, egylépéses kérés**, amelyben benne van a hibás SQL és a hibaüzenet, nem
+  egy folytatott beszélgetés. Nincs mit visszajátszani vagy szerkeszteni az előzményekben.
+- API-kulcs nélkül (`FINQL_LLM_PROVIDER=fake`) az alkalmazás a projektterv példakérdéseire a kézzel
+  írt SQL-lel válaszol, így a teljes biztonsági lánc kulcs és költség nélkül is kipróbálható.
+
+### ADR-006: A költségőr fő mércéje a becsült sorszám, nem a költség
+
+A `large` skálán (15 millió tranzakció) mérve az EXPLAIN *költsége* nem választja szét a jó és a
+rossz lekérdezést: a `loans` nézetre írt példakérdés becsült költsége 16 millió, mégis 0,5 s alatt
+fut, egy hibás JOIN pedig 2 millió költséggel is percekig tartana. Az ok: a tervező a fiókszintű
+RLS-feltétel (`(minden fiók) OR EXISTS(…)`) mindkét ágát beárazza minden törlesztőrészletre, pedig
+futáskor az InitPlan rövidre zárja.
+
+A tervben szereplő **legnagyobb köztes sorszám** viszont éles határt húz: a legitim lekérdezéseknél
+legfeljebb ~8 millió, a feltétel nélküli vagy rossz feltételű JOIN-oknál 70 milliótól 10¹⁴-ig.
+Ezért: sorszám-küszöb 50 millió (fő szabály), költségküszöb 100 millió (hátvéd). A mérés részletei:
+[05 – Text-to-SQL biztonság](05-text-to-sql-biztonsag.md).
 
 ### ADR-005: Fejlesztői eszközök
 
@@ -156,5 +184,6 @@ végzi. Egy kevesebb rendszer, amit üzemeltetni kell.
 | 003 | PostgreSQL 18 + pgvector, nincs külön vektor-DB | Elfogadva |
 | 004 | Provider-független LLM- és embedding-interfész, Claude az alapértelmezett | Elfogadva |
 | 005 | uv, ruff, mypy, pytest + testcontainers, sqlglot, typer | Elfogadva |
+| 006 | Költségőr: a becsült köztes sorszám a fő mérce, a költség csak hátvéd | Elfogadva (mérés alapján) |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

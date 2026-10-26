@@ -10,8 +10,14 @@ class Settings(BaseSettings):
 
     env: Literal["dev", "test", "prod"] = "dev"
     log_level: str = "INFO"
-    # SQLAlchemy URL, e.g. postgresql+asyncpg://user:pass@localhost:5432/finql
+    # SQLAlchemy URL, e.g. postgresql+asyncpg://finql_app:pass@localhost:5432/finql
     database_url: SecretStr
+    # LLM-generated SQL runs with this one (finql_llm_reader). Used from phase 3.
+    llm_database_url: SecretStr | None = None
+    # Alembic and the seed (finql_migrator), e.g. postgresql+psycopg://finql_migrator:...
+    migration_database_url: SecretStr | None = None
+    # Only for `finql db bootstrap`: a superuser or CREATEROLE connection.
+    admin_database_url: SecretStr | None = None
 
 
 @lru_cache

@@ -41,15 +41,17 @@ Ryuk-konténere Docker Desktopon nem indul el időben (→ Windows-on kikapcsolv
 
 **Cél:** egy valószerű, jogosultságkezelt, dokumentált banki adatbázis.
 
-- [ ] `db/roles`: a négy szerepkör, alapjogok, `REVOKE … FROM PUBLIC`
-- [ ] `db/bank`: típusok, táblák, FK-k, CHECK-ek, havi particionálás a `transactions` táblán
-- [ ] Alembic-migrációk, amelyek az SQL-fájlokat futtatják. `env.py` `include_object` szűrő.
-- [ ] `pipelines/seed`: Faker `hu_HU`, skálák (`tiny`/`small`/`large`), rögzített seed, beépített „történetek”
-- [ ] Betöltés `COPY`-val, indexek a betöltés után, `ANALYZE`
+- [x] `db/roles`: a szerepkörök, alapjogok, `REVOKE … FROM PUBLIC` (`finql db bootstrap`, nem Alembic: a szerepkör klaszterszintű)
+- [x] `db/bank`: típusok, táblák, FK-k, CHECK-ek, havi particionálás a `transactions` táblán
+- [x] Alembic-migrációk, amelyek az SQL-fájlokat futtatják. `env.py`: `SET ROLE finql_owner`, `include_name` szűrő.
+- [x] `pipelines/seed`: Faker `hu_HU`, skálák (`tiny`/`small`/`large`), rögzített seed, beépített „történetek”
+- [x] Betöltés `COPY`-val, indexek a betöltés után, `ANALYZE` (`small`: ~55 s)
 - [ ] `db/analytics`: nézetek PII nélkül, `amount_huf`, `dpd_bucket`, materializált havi összesítő
 - [ ] `COMMENT ON` minden nézetre és oszlopra (ebből lesz az LLM-kontextus)
 - [ ] `db/security`: `app_ctx` függvények, RLS policy-k, nézettulajdonos `finql_analytics`
 - [ ] Integrációs tesztek: RLS (saját fiók, összes fiók, kontextus nélkül 0 sor), read-only, PII-hozzáférés tiltva
+
+Két PR-ban: (1) séma, szerepkörök, seed; (2) nézetek, RLS, biztonsági tesztek.
 
 **Kész, ha:** `uv run finql seed --scale small` 5 percen belül lefut, és a biztonsági
 integrációs tesztek zöldek. Kézzel írt SQL-lel megválaszolható a [projektterv](01-projekt-terv.md)

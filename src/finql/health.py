@@ -33,7 +33,7 @@ async def health() -> HealthResponse:
 @router.get("/ready", responses={503: {"model": ReadyResponse}})
 async def ready(request: Request, response: Response) -> ReadyResponse:
     """Readiness: the database answers within the timeout."""
-    engine: AsyncEngine = request.app.state.engine
+    engine: AsyncEngine = request.app.state.app_engine
     try:
         async with asyncio.timeout(READY_TIMEOUT_SECONDS), engine.connect() as conn:
             await conn.execute(text("SELECT 1"))

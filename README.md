@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** 1. fázis kész (banki adatbázis, szintetikus adatok, PII-mentes nézetek, RLS). Következik: 2. fázis, FastAPI-gerinc és auth. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 2. fázis kész (FastAPI-gerinc, bejelentkezés, szerepkörök). Következik: 3. fázis, Text-to-SQL. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 
@@ -53,6 +53,7 @@ Előfeltétel: [uv](https://docs.astral.sh/uv/) és Docker.
 cp .env.example .env              # írd át a jelszavakat
 uv sync                           # Python 3.12 + függőségek
 uv run poe db-setup               # Postgres (Docker) → szerepkörök → migrációk → ~2 millió tranzakció (~1 perc)
+uv run finql user demo           # demófelhasználók szerepkörönként (jelszó: FINQL_DEMO_PASSWORD)
 uv run poe dev                    # http://127.0.0.1:8000/docs
 ```
 
@@ -60,6 +61,10 @@ A `db-setup` lépései külön is futtathatók: `db-up`, `db-bootstrap` (szerepk
 `db-migrate` (`alembic upgrade head`), `seed` (`finql seed --scale small`; újratöltés: `--reset`).
 
 Ellenőrzés: `curl 127.0.0.1:8000/ready` → `{"status":"ready","database":"ok"}`
+
+Bejelentkezés: a `/docs` oldalon az **Authorize** gombbal, pl. `pecs@minta-bank.example`
+(pécsi fiókvezető) vagy `elemzo@minta-bank.example` (elemző) és a `FINQL_DEMO_PASSWORD`.
+Utána a `GET /auth/me` a szerepkört és a fiókot adja vissza.
 
 | Parancs | Mit csinál |
 |---|---|

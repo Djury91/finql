@@ -74,6 +74,9 @@ IDENTITY_COLUMNS = {
     "loans": "loan_id",
 }
 ALL_TABLES = (*COLUMNS, "business_day")
+# Code-first tables point at bank.branches (app.users.branch_id), so the branches are upserted,
+# never truncated: TRUNCATE would fail, and TRUNCATE … CASCADE would delete the users.
+UPSERTED_TABLES = ("branches",)
 # Derived from the loaded rows (migration 0003); refreshed at the end of every load.
 MATERIALIZED_VIEWS = ("monthly_account_summary",)
 PROGRESS_EVERY = 500_000
@@ -106,15 +109,16 @@ def load(
             if not reset:
                 raise SeedError("A bank séma már tartalmaz adatot. Újratöltés: --reset")
             progress("Meglévő adatok törlése…")
-            tables = sql.SQL(", ").join(sql.Identifier("bank", t) for t in ALL_TABLES)
+            truncated = [t for t in ALL_TABLES if t not in UPSERTED_TABLES]
+            tables = sql.SQL(", ").join(sql.Identifier("bank", t) for t in truncated)
             conn.execute(sql.SQL("TRUNCATE {} RESTART IDENTITY").format(tables))
 
         conn.execute(
             "SELECT bank.create_transaction_partitions(%s, %s)",
             (scale.period_start, scale.business_date),
         )
+        counts["branches"] = _upsert_branches(conn, generator.branch_rows())
         sources: dict[str, Iterable[Row]] = {
-            "branches": generator.branch_rows(),
             "products": generator.product_rows(),
             "merchants": generator.merchant_rows(),
             "fx_rates": generator.fx_rows(),
@@ -181,14 +185,41 @@ def _has_data(conn: psycopg.Connection[Any]) -> bool:
     )
 
 
+def _upsert_branches(conn: psycopg.Connection[Any], rows: Iterable[Row]) -> int:
+    """Insert or update the scale's branches; delete the rest unless something refers to them."""
+    conn.execute("CREATE TEMP TABLE branches_load (LIKE bank.branches) ON COMMIT DROP")
+    count = _copy(conn, "branches", rows, target=sql.Identifier("branches_load"))
+    conn.execute(
+        """INSERT INTO bank.branches (branch_id, code, name, city, region)
+           SELECT branch_id, code, name, city, region FROM branches_load
+           ON CONFLICT (branch_id) DO UPDATE
+           SET code = EXCLUDED.code, name = EXCLUDED.name,
+               city = EXCLUDED.city, region = EXCLUDED.region"""
+    )
+    try:
+        with conn.transaction():  # savepoint: report the conflict instead of a bare FK error
+            conn.execute(
+                """DELETE FROM bank.branches b
+                   WHERE NOT EXISTS (SELECT FROM branches_load l WHERE l.branch_id = b.branch_id)"""
+            )
+    except psycopg.errors.ForeignKeyViolation as exc:
+        raise SeedError(
+            "Ebben a skálában kevesebb fiók van, de egy felhasználó a kimaradó fiókra hivatkozik. "
+            "Módosítsd vagy töröld a felhasználót, vagy tölts be nagyobb skálát."
+        ) from exc
+    return count
+
+
 def _copy(
     conn: psycopg.Connection[Any],
     table: str,
     rows: Iterable[Row],
     progress: Progress | None = None,
+    *,
+    target: sql.Composable | None = None,
 ) -> int:
     statement = sql.SQL("COPY {} ({}) FROM STDIN").format(
-        sql.Identifier("bank", table),
+        target or sql.Identifier("bank", table),
         sql.SQL(", ").join(sql.Identifier(c) for c in COLUMNS[table]),
     )
     count = 0

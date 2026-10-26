@@ -64,13 +64,13 @@ integrációs tesztek zöldek. Kézzel írt SQL-lel megválaszolható a [projekt
 
 **Cél:** az alkalmazás váza, felhasználókkal és szerepkörökkel.
 
-- [ ] `main.py` app factory, `lifespan`-ben két engine (`app` és `llm`)
-- [ ] `core/db.py`: async session dependency, tranzakciókezelés
-- [ ] `auth`: `User` modell (code-first), Alembic autogenerate, review
-- [ ] Argon2 jelszó-hash, JWT kiadás és ellenőrzés, `get_current_user`, `require_role`
-- [ ] `finql create-user` CLI-parancs, demófelhasználók szerepkörönként
-- [ ] Egységes hibaformátum (`core/errors.py`), request-ID middleware, structlog
-- [ ] Tesztek: bejelentkezés, lejárt token, rossz szerepkör → 403
+- [x] `main.py` app factory, `lifespan`-ben két engine (`app` és `llm`)
+- [x] `core/db.py`: async session dependency, tranzakciókezelés (kérésenként egy tranzakció)
+- [x] `auth`: `User` modell (code-first), Alembic autogenerate, review; `alembic check` teszt a modell–migráció eltérésre
+- [x] Argon2id jelszó-hash (threadpoolban), JWT kiadás és ellenőrzés, `get_current_user`, `require_role`
+- [x] `finql user create` CLI-parancs (rejtett jelszóbekérés), `finql user demo`: demófelhasználók szerepkörönként
+- [x] Egységes hibaformátum (`core/errors.py`), request-ID middleware, structlog
+- [x] Tesztek: bejelentkezés, lejárt token, rossz szerepkör → 403, letiltott felhasználó, hamisított token
 
 **Kész, ha:** a `/docs`-ban (OpenAPI) be lehet jelentkezni, és a `/auth/me` a helyes szerepkört adja.
 

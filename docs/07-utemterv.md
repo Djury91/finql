@@ -151,17 +151,36 @@ riport rendben van. A valódi mérés API-kulcsra vár: `FINQL_ANTHROPIC_API_KEY
 
 **Cél:** a belső szabályzatokból forrásmegjelölt válaszok.
 
-- [ ] 15–20 szintetikus banki dokumentum (`data/documents/`): díjjegyzék, hitelezési szabályzat, behajtás, kártyafeltételek
-- [ ] `Document` és `DocumentChunk` modell, HNSW- és GIN-index, generált `tsvector` (`hungarian`)
-- [ ] `chunking.py`: címsor-alapú darabolás, ~500 token, átfedéssel, metaadat (szakaszcím)
-- [ ] `llm/embeddings.py`: Voyage és helyi implementáció, batch-elés
-- [ ] `finql ingest`: hash-alapú inkrementális betöltés, törölt fájlok kezelése
-- [ ] `retriever.py`: hibrid keresés RRF-fel, `min_role` szűrés SQL-ben
-- [ ] `POST /documents/search` és RAG-válasz idézetekkel (dokumentum + szakasz)
-- [ ] Mini eval: 20 kérdés → az elvárt dokumentum a top 5-ben van? (recall@5)
+- [x] 20 szintetikus banki dokumentum (`data/documents/`, 15 általános, 5 belső): díjjegyzékek, kamathirdetmény, termékfeltételek, követeléskezelés, panaszkezelés, pénzmosás-megelőzés, hitelezési szabályzat, értékvesztés, fogalomtár
+- [x] `Document` és `DocumentChunk` modell, HNSW- és GIN-index, generált `tsvector` (`hungarian`, a címsor nagyobb súllyal)
+- [x] `chunking.py`: címsor-alapú darabolás, ~500 token, átfedéssel, a szakaszcím a részlet mellett
+- [x] `llm/embeddings.py`: Voyage és helyi (hash-alapú) implementáció, batch-elés (a 4. fázisból)
+- [x] `finql ingest`: hash-alapú inkrementális betöltés egy tranzakcióban, modellváltáskor újra-embedding, törölt fájlok kezelése
+- [x] `retriever.py`: hibrid keresés RRF-fel, olvasási szint az SQL-ben (`min_role` helyett, ADR-008); embedding nélkül csak szöveges keresés
+- [x] `POST /documents/search` és `POST /documents/answer`: válasz idézetekkel (dokumentum + szakasz), hivatkozás nélküli választ nem ad; `answer_log` (append-only, a tokenkeretbe számít)
+- [x] Mini eval: 20 kérdés → az elvárt dokumentum a top 5-ben van? (`finql eval retrieval`: recall@5, MRR, szivárgás)
+- [ ] Élő próba Claude-dal és Voyage-dzsal: recall@5 a valódi embeddinggel, idézett válaszok (API-kulcsra vár)
 
 **Kész, ha:** „Mennyi a késedelmi kamat?” jellegű kérdésekre helyes, idézett válasz jön,
 és a jogosultság nélküli dokumentum nem jelenik meg.
+
+**Állapot:** a teljes út kész és tesztelt: betöltés, hibrid keresés, olvasási szint, idézett
+válasz, napló. A kulcs nélküli (hash-alapú) embeddinggel a keresési eval **recall@5 = 17/17**,
+MRR 0,75, és a három szivárgáspróbán egyetlen belső dokumentum sem jutott fiókvezetőhöz. A
+válasz útja ál-LLM-mel tesztelt (idézet-ellenőrzés, napló, tokenkeret). A Voyage-dzsal mért
+recall és a Claude-dal adott válaszok API-kulcsra várnak.
+
+**Tanulságok:**
+- A szerepkörök nem létra: az auditor nem lát banki adatot, mégis minden szabályzatot olvas. A
+  dokumentum ezért olvasási szintet kap, és a szerepkörhöz kódban rendelünk szintet, nem
+  „legalább ez a szerepkör” szabályt.
+- A `plainto_tsquery` `AND`-del köti a szavakat: egy természetes kérdésre („Mit kell tennie a
+  fiókvezetőnek, ha…”) szinte semmit nem talál. A szavakat `OR`-ral kötjük, a rangsort a
+  `ts_rank_cd` adja.
+- A hivatkozás nélküli választ a kód dobja el, nem a promptra bízzuk: a prompt kéri, a kód
+  ellenőrzi. Ugyanez a minta, mint a text-to-SQL-nél (a modell javasol, a kód dönt).
+- A naplóban a forrás `fájl@verzió#részlet`, nem részletazonosító: egy újratöltés után is
+  megmondja, melyik szövegváltozatra épült a válasz.
 
 ---
 

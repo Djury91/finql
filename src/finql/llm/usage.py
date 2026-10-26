@@ -1,4 +1,5 @@
-"""Per-user daily LLM token budget, counted from the query log."""
+"""Per-user daily LLM token budget, counted from the logs of every LLM call: the query log
+(text-to-SQL) and the answer log (documents)."""
 
 import uuid
 
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from finql.audit.models import QueryLog
 from finql.core.errors import AppError
+from finql.rag.models import AnswerLog
 
 # The budget resets at midnight in the bank's time zone, not at UTC midnight.
 BUDGET_TIME_ZONE = "Europe/Budapest"
@@ -21,12 +23,15 @@ class TokenBudgetExceededError(AppError):
 async def tokens_used_today(session: AsyncSession, user_id: uuid.UUID) -> int:
     local_midnight = f"date_trunc('day', now() AT TIME ZONE '{BUDGET_TIME_ZONE}')"
     day_start = text(f"{local_midnight} AT TIME ZONE '{BUDGET_TIME_ZONE}'")
-    used = await session.scalar(
-        select(func.coalesce(func.sum(QueryLog.input_tokens + QueryLog.output_tokens), 0)).where(
-            QueryLog.user_id == user_id, QueryLog.created_at >= day_start
+    used = 0
+    for log in (QueryLog, AnswerLog):
+        tokens = await session.scalar(
+            select(func.coalesce(func.sum(log.input_tokens + log.output_tokens), 0)).where(
+                log.user_id == user_id, log.created_at >= day_start
+            )
         )
-    )
-    return int(used or 0)
+        used += int(tokens or 0)
+    return used
 
 
 async def check_budget(session: AsyncSession, user_id: uuid.UUID, daily_budget: int) -> int:

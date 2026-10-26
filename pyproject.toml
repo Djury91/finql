@@ -95,4 +95,6 @@ test-llm = { cmd = "pytest -m llm", help = "A valódi Claude-dal futó tesztek (
 examples-sync = { cmd = "finql examples sync", help = "Few-shot példák betöltése (embeddinggel)" }
 eval = { cmd = "finql eval run", help = "Eval a valódi modellel (API-kulcs kell, pénzbe kerül)" }
 eval-oracle = { cmd = "finql eval run --llm oracle --no-save", help = "Az eval harness önellenőrzése, ingyen" }
+ingest = { cmd = "finql ingest", help = "Dokumentumok betöltése (darabolás, embedding)" }
+eval-retrieval = { cmd = "finql eval retrieval", help = "A dokumentumkeresés mérése (recall@5), LLM nélkül" }
 check = { sequence = ["lint", { cmd = "ruff format --check ." }, "typecheck", "test"], help = "Amit a CI is futtat" }

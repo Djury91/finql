@@ -366,8 +366,9 @@ hivatkozik, a seed érthető hibával leáll.
 | `conversations` | `id`, `user_id FK`, `title`, `created_at`, `updated_at` | |
 | `messages` | `id`, `conversation_id FK`, `role` (user/assistant/tool), `content jsonb`, `model`, `input_tokens`, `output_tokens`, `latency_ms`, `created_at` | Az eszközhívások is itt vannak |
 | `query_log` | `id bigint identity`, `user_id`, `scope`, `branch_id`, `question`, `attempt`, `status` (enum), `generated_sql`, `executed_sql`, `rejection_reason`, `explain_cost`, `row_count`, `duration_ms`, `model`, `prompt_version`, `example_ids int[]`, `input_tokens`, `output_tokens`, `llm_latency_ms`, `request_id`, `created_at` | **Append-only:** `finql_app` csak `INSERT` és `SELECT` joggal (`db/app/010_query_log.sql`). Kísérletenként egy sor; a `scope` és a `branch_id` a futáskori hatókör. A `message_id` a 6. fázisban jön a `messages` táblával. |
-| `documents` | `id`, `title`, `source_path UNIQUE`, `doc_type`, `min_role`, `content_hash`, `version`, `ingested_at` | A hash alapján ismerjük fel a változást |
-| `document_chunks` | `id`, `document_id FK ON DELETE CASCADE`, `chunk_index`, `content`, `token_count`, `embedding vector(1024)`, `embedding_model`, `tsv tsvector GENERATED`, `metadata jsonb` | HNSW- és GIN-index |
+| `documents` | `id`, `source_path UNIQUE`, `title`, `doc_type`, `access_level` (enum: `general`, `internal`), `effective_from`, `content_hash`, `version`, `ingested_at` | A hash alapján ismerjük fel a változást; a `version` minden tartalmi változásnál nő. Az olvasási szintet a szerepkör adja (ADR-008). |
+| `document_chunks` | `id bigint identity`, `document_id FK ON DELETE CASCADE`, `chunk_index`, `section`, `content`, `token_count`, `embedding vector(1024)`, `embedding_model`, `tsv tsvector GENERATED`; `UNIQUE (document_id, chunk_index)` | HNSW-index (koszinusz) és GIN-index. A `section` a címsorlánc, erre hivatkozik a válasz. |
+| `answer_log` | `id bigint identity`, `user_id`, `question`, `status` (enum), `access_level`, `search_mode`, `source_refs text[]`, `cited_refs text[]`, `answer`, `model`, `prompt_version`, `input_tokens`, `output_tokens`, `llm_latency_ms`, `request_id`, `created_at` | **Append-only** (`db/app/020_answer_log.sql`), mint a `query_log`. Egy dokumentum-válasz egy sor; a források `fájl@verzió#részlet` alakban. A napi tokenkeretbe számít. |
 | `sql_examples` | `id`, `question UNIQUE`, `sql`, `tags text[]`, `embedding vector(1024)`, `embedding_model`, `is_active`, `created_at`, `updated_at` | Dinamikus few-shot példák (forrás: `data/sql_examples.yaml`). A kiválasztás csak az aktuális modell vektorait hasonlítja össze. A fájlból törölt példa `is_active = false` lesz, nem törlődik: a `query_log.example_ids` hivatkozhat rá. Vektorindex nincs: pár tucat sort a szekvenciális olvasás gyorsabban végignéz. |
 | `eval_runs` | `id`, `started_at`, `finished_at`, `model`, `prompt_version`, `few_shot_k`, `embedding_model`, `git_commit`, `label`, `question_count`, `accuracy`, `valid_sql_rate`, `refusal_rate`, `latency_p50_ms`, `latency_p95_ms`, `avg_tokens`, `metrics jsonb` | Egy `finql eval run`: ami a számokat befolyásolhatja, és a fő metrikák. A trend egy lekérdezés. |
 | `eval_results` | `id`, `run_id FK ON DELETE CASCADE`, `dataset`, `question_id`, `question`, `scope`, `branch_id`, `passed`, `status`, `reason`, `generated_sql`, `attempts`, `latency_ms`, `input_tokens`, `output_tokens`, `example_ids`; `UNIQUE (run_id, dataset, question_id)` | Kérdésenként egy sor: két futás összevetése (`finql eval compare`) ebből készül. |
@@ -384,62 +385,39 @@ aznapi (budapesti naptári nap) összes input- és outputtokenje. A naplóírás
 fut, mert az elutasított kérdés hibaválasza visszagörgeti a kérés tranzakcióját, a naplósornak
 viszont pont akkor kell megmaradnia.
 
-```python
-# src/finql/rag/models.py (vázlat)
-class DocumentChunk(Base):
-    __tablename__ = "document_chunks"
-    __table_args__ = (
-        Index(
-            "ix_chunks_embedding_hnsw",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_with={"m": 16, "ef_construction": 64},
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
-        Index("ix_chunks_tsv", "tsv", postgresql_using="gin"),
-        {"schema": "app"},
-    )
-    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("app.documents.id", ondelete="CASCADE")
-    )
-    chunk_index: Mapped[int]
-    content: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[list[float]] = mapped_column(Vector(1024))
-    embedding_model: Mapped[str]
-    tsv: Mapped[str] = mapped_column(
-        TSVECTOR, Computed("to_tsvector('hungarian', content)", persisted=True)
-    )
-```
+`answer_log.status` értékei: `ok` (idézett válasz), `no_answer` (nincs találat, vagy a
+források nem válaszolnak), `uncited` (a modell hivatkozás nélkül válaszolt, ezért a válasz nem
+jelent meg; a szövege a naplóban van), `rejected_budget`, `llm_error`.
 
-### Hibrid keresés (RRF)
+### Dokumentumrészletek és keresés
+
+A `tsv` generált oszlop: `setweight(to_tsvector('hungarian', section), 'A') ||
+setweight(to_tsvector('hungarian', content), 'B')`. A magyar szótár szótövez („kamatot” →
+„kam”), és a címsorban talált szó többet ér. A `section` a dokumentumon belüli címsorlánc
+(„Díjak > Kártyák”), a bevezető bekezdésnél üres.
+
+A hibrid keresés két lekérdezés és egy fúzió (`rag/retriever.py`, ADR-008):
 
 ```sql
-WITH vec AS (
-    SELECT c.id, row_number() OVER (ORDER BY c.embedding <=> :qvec) AS rnk
-    FROM app.document_chunks c
-    JOIN app.documents d ON d.id = c.document_id
-    WHERE d.min_role <= :user_role_level
-    ORDER BY c.embedding <=> :qvec
-    LIMIT 40
-), fts AS (
-    SELECT c.id, row_number() OVER (ORDER BY ts_rank_cd(c.tsv, q) DESC) AS rnk
-    FROM app.document_chunks c
-    JOIN app.documents d ON d.id = c.document_id,
-         websearch_to_tsquery('hungarian', :qtext) q
-    WHERE c.tsv @@ q AND d.min_role <= :user_role_level
-    ORDER BY ts_rank_cd(c.tsv, q) DESC
-    LIMIT 40
-)
-SELECT id, sum(1.0 / (60 + rnk)) AS score
-FROM (SELECT * FROM vec UNION ALL SELECT * FROM fts) s
-GROUP BY id
-ORDER BY score DESC
-LIMIT 8;
+-- Vektoros ág: a 40 legközelebbi részlet az aktuális embeddingmodellből
+SET LOCAL hnsw.iterative_scan = relaxed_order;
+SELECT c.id FROM app.document_chunks c JOIN app.documents d ON d.id = c.document_id
+WHERE d.access_level <= :level AND c.embedding_model = :model
+ORDER BY c.embedding <=> :query_vector, c.id
+LIMIT 40;
+
+-- Szöveges ág: a szavak OR-ral, a ts_rank_cd rangsorol
+SELECT c.id FROM app.document_chunks c JOIN app.documents d ON d.id = c.document_id
+WHERE d.access_level <= :level
+  AND c.tsv @@ replace(plainto_tsquery('hungarian', :query)::text, ' & ', ' | ')::tsquery
+ORDER BY ts_rank_cd(c.tsv, …) DESC, c.id
+LIMIT 40;
 ```
 
-Szűrt HNSW-keresésnél a pgvector iteratív scanje (`SET LOCAL hnsw.iterative_scan = relaxed_order`)
-gondoskodik róla, hogy a szűrés után is meglegyen a kért elemszám.
+A két listát Pythonban egyesíti a Reciprocal Rank Fusion: `score = Σ 1 / (60 + helyezés)`. Az
+olvasási szint mindkét ág `WHERE`-jében ott van. A szűrt HNSW-keresésnél a pgvector iteratív
+scanje gondoskodik róla, hogy a szűrés után is meglegyen a kért elemszám. A ~120 részletnél a
+tervező még szekvenciálisan olvas; az index a több ezer részletes méretnél számít.
 
 ## 7. Szintetikus adatok (seed)
 

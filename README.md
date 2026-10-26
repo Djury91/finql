@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** 4. fázis: az eval harness és a dinamikus few-shot kész (50 arany és 20 rosszindulatú kérdés, végrehajtási pontosság, riport); a valódi modellel mért számok API-kulcsra várnak. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 5. fázis: a dokumentumkeresés (RAG) kész: 20 szintetikus szabályzat, hibrid keresés, olvasási szint az SQL-ben, idézett válaszok. A 4. fázis eval harnessével együtt a valódi modellel mért számok API-kulcsra várnak. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 
@@ -98,6 +98,24 @@ Kulcs nélkül a few-shot a `FINQL_EMBEDDING_PROVIDER=hashing` beállítással i
 lexikális hasonlóság). Az `eval.yml` workflow kézzel indítható a GitHubon (secretek:
 `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`).
 
+### Dokumentumok (RAG)
+
+```bash
+uv run finql ingest                   # data/documents → darabolás, embedding (csak a változottak)
+uv run finql eval retrieval           # 20 kérdés: recall@5, MRR, és nem szivárog-e belső dokumentum
+```
+
+- `POST /documents/search` `{"query": "késedelmi kamat", "top_k": 5}`: hibrid keresés (vektoros +
+  magyar teljes szöveges, Reciprocal Rank Fusion). A fiókvezető csak az általános dokumentumokat
+  látja, az elemző és az auditor a belsőket is; a szűrés az SQL-ben történik.
+- `POST /documents/answer` `{"question": "Mennyi a késedelmi kamat a személyi kölcsönnél?"}`:
+  válasz a dokumentumokból, minden állítás mögött a forrás számával (`[1]`), a forrásokkal
+  együtt. Hivatkozás nélküli választ nem ad. Minden válasz az `answer_log`-ba kerül.
+
+Kulcs nélkül: `FINQL_EMBEDDING_PROVIDER=hashing` (lexikális hasonlóság), és embedding nélkül is
+működik a keresés, csak szöveges módban. `FINQL_LLM_PROVIDER=fake` esetén a válasz a legjobb
+forrás eleje, idézve. A döntések: [ADR-008](docs/02-technologiai-dontesek.md).
+
 ### Fejlesztői parancsok
 
 | Parancs | Mit csinál |
@@ -107,8 +125,6 @@ lexikális hasonlóság). Az `eval.yml` workflow kézzel indítható a GitHubon 
 | `uv run poe test-llm` | Néhány kérdés a valódi Claude-dal (API-kulcs kell, pár cent) |
 | `uv run poe db-down` | Postgres leállítása (az adat megmarad) |
 | `uv run pre-commit install` | Git-hookok bekapcsolása |
-
-A későbbi fázisokban jön: `finql ingest` (RAG).
 
 ## Licenc
 

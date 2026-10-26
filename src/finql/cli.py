@@ -11,6 +11,8 @@ from finql import __version__
 from finql.core.config import get_settings
 
 if TYPE_CHECKING:
+    from finql.eval.retrieval import RetrievalOutcome
+    from finql.rag.ingest import IngestResult
     from finql.text_to_sql.examples import SyncResult
 
 app = typer.Typer(help="FinQL parancssori eszközök.", no_args_is_help=True)
@@ -146,6 +148,64 @@ def user_demo() -> None:
         status = "létrehozva" if user.email in created else "már létezett"
         branch = f" ({user.branch_code})" if user.branch_code else ""
         typer.echo(f"  {user.email:<32} {user.role.value}{branch}: {status}")
+
+
+@app.command()
+def ingest(
+    directory: Annotated[Path, typer.Option("--dir", help="A dokumentumok mappája.")] = Path(
+        "data/documents"
+    ),
+    force: Annotated[
+        bool, typer.Option(help="Minden dokumentum újrafeldolgozása (pl. darabolásváltozás után).")
+    ] = False,
+) -> None:
+    """Dokumentumok betöltése: darabolás, embedding, mentés. Csak a változottakat dolgozza fel."""
+    from finql.core.errors import AppError
+    from finql.rag.sources import DocumentError
+
+    try:
+        result = asyncio.run(_ingest(directory, force=force))
+    except DocumentError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    except AppError as exc:
+        typer.echo(exc.message, err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(
+        f"Új: {len(result.added)}, frissítve: {len(result.updated)}, "
+        f"változatlan: {len(result.unchanged)}, törölve: {len(result.deleted)}; "
+        f"{result.chunks} részlet embeddingelve"
+    )
+
+
+async def _ingest(directory: Path, *, force: bool) -> "IngestResult":
+    from finql.core.db import create_engine, create_sessionmaker
+    from finql.llm.embeddings import VoyageEmbedder, build_embedder
+    from finql.rag.ingest import ingest_documents
+    from finql.rag.sources import load_documents
+
+    settings = get_settings()
+    documents = load_documents(directory)  # every file parses before anything is written
+    embedder = build_embedder(settings)
+    if embedder is None:
+        typer.echo(
+            "Nincs embedding: FINQL_VOYAGE_API_KEY, vagy FINQL_EMBEDDING_PROVIDER=hashing.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    engine = create_engine(settings.database_url.get_secret_value())
+    try:
+        return await ingest_documents(
+            create_sessionmaker(engine),
+            embedder,
+            documents,
+            force=force,
+            progress=lambda path, status: typer.echo(f"  {path:<40} {status}"),
+        )
+    finally:
+        if isinstance(embedder, VoyageEmbedder):
+            await embedder.close()
+        await engine.dispose()
 
 
 examples_app = typer.Typer(help="Few-shot példák kezelése.", no_args_is_help=True)
@@ -296,3 +356,54 @@ def eval_compare(
     else:
         out.write_text(report, encoding="utf-8", newline="\n")
         typer.echo(f"Mentve: {out}")
+
+
+@eval_app.command("retrieval")
+def eval_retrieval(
+    top_k: Annotated[int, typer.Option(min=1, max=20, help="Ennyi találatban keres.")] = 5,
+    save: Annotated[bool, typer.Option(help="Riport az eval/reports mappába.")] = True,
+) -> None:
+    """A dokumentumkeresés mérése: recall@k, MRR, és hogy belső dokumentum nem jut-e fiókvezetőhöz.
+    Előtte: finql ingest."""
+    from datetime import datetime
+
+    from finql.eval.retrieval import render_retrieval_report, summarize_retrieval
+    from finql.eval.run import REPORTS_DIR
+
+    outcomes, model = asyncio.run(_retrieval_outcomes(top_k))
+    for o in outcomes:
+        mark = "HIBA" if o.leaked or (o.question.expected and o.rank is None) else "ok  "
+        rank = f"#{o.rank}" if o.rank is not None else "-"
+        typer.echo(f"  {mark} {o.question.id:<28} {rank:<4} {', '.join(o.found)}")
+    metrics = summarize_retrieval(outcomes, k=top_k)
+    typer.echo(
+        f"Recall@{top_k}: {metrics.hits}/{metrics.measured}, MRR: {metrics.mrr:.3f}, "
+        f"szivárgás: {metrics.leaks}"
+    )
+    if save:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = REPORTS_DIR / f"retrieval-{datetime.now():%Y%m%d-%H%M}.md"
+        report = render_retrieval_report(outcomes, metrics, embedding_model=model)
+        path.write_text(report, encoding="utf-8", newline="\n")
+        typer.echo(f"Riport: {path}")
+    if metrics.leaks:
+        raise typer.Exit(1)
+
+
+async def _retrieval_outcomes(top_k: int) -> "tuple[list[RetrievalOutcome], str | None]":
+    from finql.core.db import create_engine, create_sessionmaker
+    from finql.eval.retrieval import load_retrieval, run_retrieval_eval
+    from finql.llm.embeddings import VoyageEmbedder, build_embedder
+    from finql.rag.retriever import Retriever
+
+    settings = get_settings()
+    embedder = build_embedder(settings)
+    engine = create_engine(settings.database_url.get_secret_value())
+    try:
+        retriever = Retriever(create_sessionmaker(engine), embedder)
+        outcomes = await run_retrieval_eval(retriever, load_retrieval(), top_k=top_k)
+    finally:
+        if isinstance(embedder, VoyageEmbedder):
+            await embedder.close()
+        await engine.dispose()
+    return outcomes, embedder.model if embedder is not None else None

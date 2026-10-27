@@ -51,7 +51,7 @@ A megvalósításban (`text_to_sql/validator.py`) ezen felül:
   esetén nincs újrapróbálás: az tiltott szándék, nem elírás.
 - A sqlglot az újragenerálásnál átírhatja a lekérdezést (`now()` → `CURRENT_TIMESTAMP`, cast a
   `round(…)` köré). Egy integrációs teszt ellenőrzi, hogy a példakérdéseknél az eredmény változatlan.
-- 79 rosszindulatú tesztminta kategóriánként (írás, DDL, parancsok, session-vezérlés, rejtett
+- 80 rosszindulatú tesztminta kategóriánként (írás, DDL, parancsok, session-vezérlés, rejtett
   írás CTE-ben, RLS-kontextus, rendszerkatalógus, PII-sémák, veszélyes függvények, katalógus-castok,
   paraméterek), mindegyiknél az elvárt elutasítási okkal.
 
@@ -115,7 +115,7 @@ ott osztja meg a memóriát. A Compose-ban ezért `shm_size: 512mb`.
 
 ## Tesztelés
 
-- **Unit:** a validátorhoz paraméterezett tesztek, 79 rosszindulatú SQL-mintával (`tests/unit/text_to_sql/test_validator.py`). Az Anthropic-kliens egy mockolt HTTP-transzporton: kérésforma, refúzió, csonka válasz, hiányzó API-kulcs.
+- **Unit:** a validátorhoz paraméterezett tesztek, 80 rosszindulatú SQL-mintával (`tests/unit/text_to_sql/test_validator.py`). Az Anthropic-kliens egy mockolt HTTP-transzporton: kérésforma, refúzió, csonka válasz, hiányzó API-kulcs.
 - **Integráció:** valódi Postgres (testcontainers), ál-LLM-mel (`FakeLLMClient`). Fiókvezetőként futtatott lekérdezés csak a saját fiók sorait adja vissza. Kontextus nélkül 0 sort ad. Írási kísérletnél a validátor nélkül is `ReadOnlySqlTransaction` vagy jogosultsági hiba jön. A tiltott SQL nem kap második esélyt, az elírás igen; minden kísérlet a naplóba kerül; a napló az alkalmazás szerepkörével nem módosítható és nem törölhető (`test_query_api.py`, `test_executor.py`).
 - **Agent:** valódi Postgres, szkriptelt modellel (`FakeChatModel`, `test_agent.py`). Egy mérgezett dokumentum a modellhez címkében érkezik, amelyet nem zárhat le. Egy „engedelmes” modell, amely követi a dokumentum kérését, akkor is csak a fiókvezető saját fiókját kapja vissza; ugyanaz az SQL a teljes hatókörrel több fiókot adna. Az auditor nem kap adateszközt. A korlát fölötti eszközhívás hibaeredményt kap. Az üzenetek az alkalmazás szerepkörével nem módosíthatók.
 - **Felület:** az oldal szigorú CSP-vel érkezik, és nincs benne inline kód (`test_web.py`); a szkriptben nincs HTML-értelmezés (`innerHTML` és társai). A demóbeállítások között a demófelhasználók címe szerepel, a jelszavuk nem.

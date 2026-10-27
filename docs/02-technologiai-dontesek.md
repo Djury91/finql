@@ -291,6 +291,55 @@ modellforduló, minden eszközhívás bemenettel és eredménnyel, az összefogl
 `query_log.conversation_id` köti az agent SQL-kísérleteit a beszélgetéshez. Az üzenetek
 tokenjei a napi keretbe számítanak.
 
+### ADR-010: Webes felület – egy statikus oldal, build lépés nélkül
+
+**Egy HTML-oldal, egy szkript, egy stíluslap, amelyeket a FastAPI szolgál ki** (`web/static/`),
+és amelyek ugyanazt az API-t hívják, mint bármely más kliens. A felület vékony réteg: a lényeg
+(jogosultság, SQL-ellenőrzés, idézetek ellenőrzése) a szerveren van, a felületnek csak meg
+kell mutatnia.
+
+- **Nem HTMX + Jinja:** a válasz SSE-stream egy `POST`-ra. A böngésző `EventSource`-a és az
+  arra épülő HTMX-bővítmény csak `GET`-et küld, fejlécet (JWT) nem. A streamet ezért
+  `fetch`-csel olvassuk, ahhoz pedig úgyis szkript kell. A szerveroldali sablonok egy második
+  megjelenítési réteget adnának az API mellé.
+- **Nem Streamlit és nem React:** a Streamlit külön folyamat, és a saját állapotmodellje
+  nehezen fér össze egy SSE-streammel. A React build lépést, `node_modules`-t és egy második
+  eszközláncot hozna egy négy nézetből álló felülethez.
+- **Biztonság:** a felület modellkimenetet, SQL-eredményt és dokumentumszöveget mutat, mind
+  megbízhatatlan. Az oldal csak szövegcsomópontokból épül, HTML-ként semmit nem értelmez (egy
+  teszt figyeli, hogy ne kerüljön bele `innerHTML`). A szigorú Content-Security-Policy
+  (`script-src 'self'`, inline szkript és külső forrás nélkül) a második védvonal. A
+  válaszszöveg kis Markdown-részhalmaza (bekezdés, lista, táblázat, félkövér) és a `[n]`
+  hivatkozások is DOM-csomópontként készülnek.
+- **Token:** `sessionStorage`-ban: a lap bezárásával elvész, és 30 perc után lejár. Egy
+  `HttpOnly` süti XSS ellen jobb volna, de CSRF-védelmet kívánna, és az API-nak két
+  hitelesítési módot. A szigorú CSP mellett ez a kompromisszum vállalható egy belső eszköznél.
+- **A végleges válasz a `done` eseményből:** a streamelt szöveg csak vázlat. A `done` hozza az
+  ellenőrzött választ (érvénytelen hivatkozások nélkül) és az idézett forrásokat, a felület a
+  vázlatot erre cseréli.
+
+### ADR-011: Konténer és telepítés
+
+- **Kétlépcsős image:** az első lépcső uv-vel, a lock fájl szerint telepít (`uv sync
+  --locked`, a függőségek külön rétegben, cache-elve). A második csak a kész környezetet és a
+  futáshoz kellő fájlokat kapja (migrációk, `db/`, `data/`), uv és fordító nélkül. Nem rootként
+  fut, és a kód a root tulajdonában marad, így a folyamat nem írhatja át a saját kódját.
+- **Két parancs, egy image:** `serve` (uvicorn) és `setup` (szerepkörök, migrációk, banki
+  adatok, ha még nincsenek, demófelhasználók, dokumentumok, few-shot példák). A `setup` minden
+  lépése idempotens, így minden indításkor és minden telepítéskor futhat. Az alkalmazás csak
+  akkor indul, ha a `setup` sikeres volt (Compose: `service_completed_successfully`, PaaS:
+  pre-deploy parancs).
+- **A Compose a `.env`-et használja:** a jelszavak egy helyen maradnak. A konténerben a
+  `127.0.0.1` helyett a `db` hoszt kell; ezt az entrypoint cseréli az URL-ekben
+  (`FINQL_DB_HOST`), nem egy második jelszókészlet.
+- **PaaS: Railway, a Postgres a saját `pgvector/pgvector:pg18` image-ével, kötettel.** A
+  menedzselt Postgres-szolgáltatások többsége nem ad superusert. Itt viszont kell: a
+  `finql db bootstrap` szerepköröket hoz létre, és a `vector` bővítményt is telepíteni kell. A
+  PG18 sem mindenhol elérhető. Ugyanaz az image fut helyben, a CI-ban és a PaaS-on.
+- **Kulcs nélkül is indul:** a `.env.example` alapértéke a kulcs nélküli mód (`fake` LLM,
+  `hashing` embedding). A `cp .env.example .env && docker compose up` így API-kulcs nélkül
+  is teljes, kattintható demót ad; a valódi modellhez két sort kell átírni.
+
 ### ADR-005: Fejlesztői eszközök
 
 | Terület | Választás | Miért |
@@ -304,7 +353,7 @@ tokenjei a napi keretbe számítanak.
 | Logolás | **structlog** (JSON) | Később OpenTelemetry |
 | Konfiguráció | **pydantic-settings** | `.env` + típusos beállítások |
 | Feladatfuttató | **poethepoet** (`uv run poe test`) | Windows-on is megy, nem kell `make` |
-| Konténer | Docker Compose (`pgvector/pgvector:pg18`) | |
+| Konténer | Docker Compose (`pgvector/pgvector:pg18`), kétlépcsős alkalmazás-image | ADR-011 |
 | CI | GitHub Actions | lint → formázás → típus → teszt (a Postgrest a testcontainers indítja) |
 
 ---
@@ -322,5 +371,7 @@ tokenjei a napi keretbe számítanak.
 | 007 | Eval végrehajtási pontossággal, az API folyamatán; few-shot a felhasználói üzenetben | Elfogadva |
 | 008 | Dokumentumok: olvasási szint az SQL-ben, hibrid keresés RRF-fel, csak idézett válasz | Elfogadva |
 | 009 | Agent: saját eszközhívási ciklus korlátokkal, kérdés–válasz memória összefoglalóval, SSE | Elfogadva |
+| 010 | Webes felület: statikus oldal és szkript build nélkül, csak szövegcsomópontok, szigorú CSP | Elfogadva |
+| 011 | Kétlépcsős, nem root image; idempotens `setup`; Railway a saját pgvector-image-dzsel | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

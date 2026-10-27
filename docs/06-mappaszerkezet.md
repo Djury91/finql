@@ -24,9 +24,17 @@ finql/
 ├── .gitattributes                 # LF sorvégek minden platformon
 ├── .python-version                # 3.12 (uv ebből telepít)
 ├── .pre-commit-config.yaml
-├── Dockerfile                     # többlépcsős build, nem-root user
-├── docker-compose.yml             # db (pgvector/pgvector:pg18), api, (ui)
+├── Dockerfile                     # kétlépcsős build (uv), nem root, parancsok: serve, setup
+├── .dockerignore                  # titkok, privát jegyzetek, tesztek, cache-ek kimaradnak
+├── docker-compose.yml             # db (pgvector/pgvector:pg18) → setup → app
+├── railway.json                   # PaaS: build a Dockerfile-ból, pre-deploy setup, /ready
 ├── alembic.ini
+│
+├── docker/
+│   └── entrypoint.sh              # serve | setup | bármi más; a Compose-ban a DB-hoszt cseréje
+│
+├── scripts/
+│   └── capture_demo.py            # a README demó-GIF-je és képernyőképe (Playwright, nem függőség)
 │
 ├── .github/
 │   └── workflows/
@@ -34,8 +42,8 @@ finql/
 │       └── eval.yml               # kézi vagy éjszakai eval valódi LLM-mel (secret)
 │
 ├── docs/                          # ez a dokumentáció
-│   ├── 01-projekt-terv.md … 07-utemterv.md
-│   └── img/                       # diagramok, képernyőképek, demó GIF
+│   ├── 01-projekt-terv.md … 08-telepites.md
+│   └── img/                       # demo.gif, chat.png (scripts/capture_demo.py)
 │
 ├── db/                            # DB-FIRST rész: kézzel írt, review-zott SQL
 │   ├── roles/                     # 001_roles.sql: szerepkörök, DB-tulajdon (`finql db bootstrap` futtatja)
@@ -55,7 +63,9 @@ finql/
 │       ├── 0004_app_schema_and_users.py   # code-first: autogenerate + review
 │       ├── 0005_query_log.py
 │       ├── 0006_sql_examples.py
-│       └── 0007_eval_runs.py
+│       ├── 0007_eval_runs.py
+│       ├── 0008_documents_and_answer_log.py
+│       └── 0009_conversations_and_messages.py
 │
 ├── src/finql/
 │   ├── __init__.py
@@ -150,6 +160,10 @@ finql/
 │   │   ├── models.py              # QueryLog
 │   │   └── schemas.py
 │   │
+│   ├── web/                       # webes felület (ADR-010)
+│   │   ├── router.py              # GET / (CSP-fejlécekkel), GET /web/config
+│   │   └── static/                # index.html, app.js (SSE-olvasó, csak szövegcsomópontok), app.css
+│   │
 │   └── pipelines/                 # adat-pipeline-ok, a CLI-ből indítva
 │       └── seed/
 │           ├── generator.py       # Faker hu_HU, eloszlások, „történetek”
@@ -182,6 +196,7 @@ finql/
     │   ├── eval/test_compare.py   # mikor ugyanaz a válasz; test_datasets.py: szivárgásőr
     │   ├── rag/test_chunking.py
     │   ├── agent/test_memory.py   # előzmény, összefoglalás; test_tools.py: eszközök, hibák
+    │   ├── test_web.py            # az oldal, a CSP, nincs inline kód, nincs HTML-értelmezés
     │   └── …
     └── integration/
         ├── test_security.py       # RLS (saját fiók / minden fiók / kontextus nélkül 0 sor), írás, PII

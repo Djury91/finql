@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="hu">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FinQL</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/static/app.css" />
+    <script type="module" src="/static/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">FinQL <span class="brand-sub">elemző asszisztens</span></div>
+      <div class="whoami" id="whoami" hidden>
+        <span id="user-name"></span>
+        <span class="role" id="user-role"></span>
+        <button type="button" class="link" id="logout">Kijelentkezés</button>
+      </div>
+    </header>
+
+    <div class="banner" id="demo-banner" hidden>
+      Demó mód, API-kulcs nélkül: a válaszokat nem nyelvi modell írja. Az adatkérdések közül
+      csak a projektterv példakérdéseire felel; az eszközök, a jogosultságok és a stream valódiak.
+    </div>
+
+    <main id="login-view" class="login" hidden>
+      <form id="login-form" class="card login-card">
+        <h1>Bejelentkezés</h1>
+        <label>E-mail-cím <input name="username" type="email" autocomplete="username" required /></label>
+        <label>Jelszó <input name="password" type="password" autocomplete="current-password" required /></label>
+        <p class="error" id="login-error" role="alert" hidden></p>
+        <button type="submit" class="primary">Belépés</button>
+        <div id="demo-users" hidden>
+          <p class="hint">Demófelhasználók (jelszó: <code>FINQL_DEMO_PASSWORD</code>):</p>
+          <ul class="demo-users" id="demo-user-list"></ul>
+        </div>
+      </form>
+    </main>
+
+    <main id="chat-view" class="chat" hidden>
+      <nav class="sidebar" aria-label="Beszélgetések">
+        <button type="button" class="primary wide" id="new-conversation">Új beszélgetés</button>
+        <ul class="conversations" id="conversation-list"></ul>
+      </nav>
+      <section class="conversation">
+        <div class="messages" id="messages" aria-live="polite">
+          <div class="empty" id="empty-state">
+            <h2>Kérdezz az adatokról vagy a szabályzatokról</h2>
+            <p>
+              Az asszisztens a te jogosultságoddal kérdezi le az adatbázist és keres a
+              dokumentumokban. Minden lépését látod: a futtatott SQL-t, az eredményt és az
+              idézett forrásokat.
+            </p>
+            <div class="examples" id="examples"></div>
+          </div>
+        </div>
+        <form class="composer" id="composer">
+          <textarea
+            id="question"
+            name="question"
+            rows="2"
+            maxlength="2000"
+            placeholder="Pl. Hány 90+ napos késedelmes hitelünk van, és mi a teendő a szabályzat szerint?"
+            required
+          ></textarea>
+          <button type="submit" class="primary" id="send">Küldés</button>
+          <button type="button" id="stop" hidden>Leállítás</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

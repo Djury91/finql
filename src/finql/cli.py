@@ -77,6 +77,9 @@ def seed(
     reset: Annotated[
         bool, typer.Option(help="A meglévő banki adatok törlése a betöltés előtt.")
     ] = False,
+    if_empty: Annotated[
+        bool, typer.Option(help="Ha már van adat, nem hiba: nem tölt be semmit (konténer).")
+    ] = False,
 ) -> None:
     """Szintetikus banki adatok generálása és betöltése COPY-val."""
     from finql.core.db import psycopg_conninfo
@@ -93,6 +96,7 @@ def seed(
             SCALES[scale],
             seed=random_seed,
             reset=reset,
+            if_empty=if_empty,
             progress=typer.echo,
         )
     except SeedError as exc:

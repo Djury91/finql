@@ -96,6 +96,11 @@ def test_seed_refuses_to_overwrite_without_reset(seeded_db: DbUrls) -> None:
         load(seeded_db.conninfo("migrator"), TINY, seed=42)
 
 
+def test_if_empty_skips_a_loaded_schema(seeded_db: DbUrls) -> None:
+    # The container's setup runs on every start: the second run loads nothing and does not fail.
+    assert load(seeded_db.conninfo("migrator"), TINY, seed=42, if_empty=True) == {}
+
+
 def test_reset_reload_is_deterministic(seeded_db: DbUrls) -> None:
     fingerprint = """SELECT count(*), sum(amount), sum(account_id * extract(epoch FROM booked_at))
                      FROM bank.transactions"""

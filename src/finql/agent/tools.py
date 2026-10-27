@@ -12,11 +12,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
+from opentelemetry.semconv._incubating.attributes import gen_ai_attributes as gen_ai
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from finql.agent.metrics import MetricCatalog
 from finql.auth.models import User
 from finql.core.errors import AppError
+from finql.core.telemetry import mark_error, tracer
 from finql.llm.chat import ToolSpec
 from finql.rag.answer import document_access, render_sources
 from finql.rag.models import ROLE_ACCESS
@@ -83,6 +85,20 @@ class Tool:
 
 
 async def run_tool(tool: Tool, context: ToolContext, raw_input: dict[str, Any]) -> ToolOutput:
+    """One span per call, the agent's and the MCP server's alike. An error result marks the span
+    failed: the code (e.g. rejected_validation) says why, the input is not recorded."""
+    attributes = {
+        gen_ai.GEN_AI_OPERATION_NAME: gen_ai.GenAiOperationNameValues.EXECUTE_TOOL.value,
+        gen_ai.GEN_AI_TOOL_NAME: tool.name,
+    }
+    with tracer.start_as_current_span(f"execute_tool {tool.name}", attributes=attributes):
+        output = await _run_tool(tool, context, raw_input)
+        if output.is_error:
+            mark_error(str(output.details.get("code", "tool_error")))
+        return output
+
+
+async def _run_tool(tool: Tool, context: ToolContext, raw_input: dict[str, Any]) -> ToolOutput:
     try:
         args = tool.input_type.model_validate(raw_input)
     except ValidationError as exc:

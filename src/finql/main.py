@@ -16,6 +16,7 @@ from finql.core.config import Settings, get_settings
 from finql.core.db import create_engine, create_sessionmaker
 from finql.core.errors import install_error_handlers
 from finql.core.logging import RequestContextMiddleware, configure_logging
+from finql.core.telemetry import EXCLUDED_URLS, configure_telemetry, shutdown_telemetry
 from finql.llm.anthropic_client import AnthropicClient
 from finql.llm.chat import ChatModel
 from finql.llm.client import LLMClient
@@ -68,6 +69,8 @@ def create_app(
     they follow the settings (FINQL_LLM_PROVIDER, FINQL_EMBEDDING_PROVIDER)."""
     settings = settings or get_settings()
     configure_logging(settings.log_level, json_logs=settings.json_logs)
+    # Before the lifespan creates the engines: they are traced only if created afterwards.
+    tracing = configure_telemetry(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -108,6 +111,7 @@ def create_app(
             await app.state.app_engine.dispose()
             if app.state.llm_engine is not None:
                 await app.state.llm_engine.dispose()
+            shutdown_telemetry()
 
     app = FastAPI(title="FinQL", version=__version__, lifespan=lifespan)
     app.state.settings = settings
@@ -121,4 +125,12 @@ def create_app(
     app.include_router(audit_router)
     app.include_router(web_router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    if tracing:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        # The server span of every request: the root the model calls, tools and queries hang on.
+        # Without the ASGI send/receive spans: a streamed answer would add one per chunk.
+        FastAPIInstrumentor.instrument_app(
+            app, excluded_urls=EXCLUDED_URLS, exclude_spans=["send", "receive"]
+        )
     return app

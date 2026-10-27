@@ -6,7 +6,9 @@ subprocess over stdio, the way Claude Desktop does.
 
 import asyncio
 import json
+import os
 import re
+import subprocess
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -177,24 +179,45 @@ async def test_the_login_fails_alike_for_a_wrong_password_and_an_unknown_user(
             assert caught.value.message == "Hibás e-mail-cím vagy jelszó."
 
 
-async def test_finql_mcp_serves_over_stdio(seeded_db: DbUrls, tmp_path: Path) -> None:
-    # A real subprocess, started from an unrelated directory (no .env there), like an MCP
-    # client starts it. If anything wrote to stdout besides the protocol, the session would break.
-    env = {
+MCP_COMMAND = [sys.executable, "-c", "from finql.cli import app; app()", "mcp"]
+
+
+def mcp_env(urls: DbUrls) -> dict[str, str]:
+    return {
         "FINQL_ENV": "test",
-        "FINQL_DATABASE_URL": async_url(seeded_db.app),
-        "FINQL_LLM_DATABASE_URL": async_url(seeded_db.llm_reader),
+        "FINQL_DATABASE_URL": async_url(urls.app),
+        "FINQL_LLM_DATABASE_URL": async_url(urls.llm_reader),
         "FINQL_JWT_SECRET": TEST_JWT_SECRET,
         "FINQL_LLM_PROVIDER": "fake",
         "FINQL_EMBEDDING_PROVIDER": "hashing",
         "FINQL_MCP_EMAIL": ANALYST,
         "FINQL_MCP_PASSWORD": PASSWORD,
     }
-    server = StdioServerParameters(
-        command=sys.executable,
-        args=["-c", "from finql.cli import app; app()", "mcp"],
-        env=env,
+
+
+def test_nothing_but_the_protocol_reaches_stdout(seeded_db: DbUrls, tmp_path: Path) -> None:
+    # stdout is the protocol's channel. The server logs while it starts (login, "ready"); with
+    # no client (stdin closed at once) it stops, and its stdout must be empty: every log line
+    # belongs on stderr. A tolerant client may skip a stray line; a strict one fails on it.
+    done = subprocess.run(
+        MCP_COMMAND,
+        input=b"",
+        capture_output=True,
+        env={**os.environ, **mcp_env(seeded_db)},
         cwd=tmp_path,
+        timeout=60,
+        check=False,
+    )
+
+    assert done.stdout == b"", done.stdout[:500]
+    assert b"mcp server ready" in done.stderr
+
+
+async def test_finql_mcp_serves_over_stdio(seeded_db: DbUrls, tmp_path: Path) -> None:
+    # A real subprocess, started from an unrelated directory (no .env there), like an MCP
+    # client starts it.
+    server = StdioServerParameters(
+        command=MCP_COMMAND[0], args=MCP_COMMAND[1:], env=mcp_env(seeded_db), cwd=tmp_path
     )
     async with Client(server, read_timeout_seconds=60) as client:
         tools = {t.name for t in (await client.list_tools()).tools}

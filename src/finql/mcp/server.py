@@ -21,6 +21,7 @@ import mcp_types as types
 import structlog
 from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
+from opentelemetry import trace
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from finql import __version__
@@ -38,6 +39,8 @@ from finql.auth.service import authenticate
 from finql.core.config import Settings
 from finql.core.db import create_engine, create_sessionmaker
 from finql.core.errors import NotAuthenticatedError
+from finql.core.logging import configure_logging
+from finql.core.telemetry import configure_telemetry, shutdown_telemetry
 from finql.llm.anthropic_client import AnthropicClient
 from finql.llm.client import LLMClient
 from finql.llm.embeddings import Embedder, VoyageEmbedder, build_embedder
@@ -158,39 +161,44 @@ def build_server(backend: Backend, user_id: uuid.UUID) -> Server[Any]:
     ) -> types.CallToolResult:
         request_id = f"mcp-{uuid.uuid4().hex}"  # in the query log: this call came over MCP
         structlog.contextvars.bind_contextvars(request_id=request_id)
+        # The SDK already opens the call's server span ("tools/call <tool>", with the MCP
+        # attributes and the client's trace context, if it sent one): ours only adds the id that
+        # leads to the query log.
+        trace.get_current_span().set_attribute("finql.request_id", request_id)
         try:
-            try:
-                user = await current_user()
-            except NotAuthenticatedError as exc:
-                return _error(exc.message)
-            # Only what the user is offered can be called: an auditor has no data tool.
-            tool = next((t for t in await offered_tools(user) if t.name == params.name), None)
-            if tool is None:
-                return _error(
-                    f"Nincs ilyen eszköz, vagy ennek a felhasználónak nem elérhető: {params.name}"
-                )
-            context = ToolContext(
-                user=user,
-                retriever=backend.retriever,
-                metrics=backend.metrics,
-                sources=sources,
-                ask_database=await _database_asker(backend, user, request_id),
-                catalog=(
-                    await backend.catalog_cache.get(backend.llm_engine)
-                    if backend.llm_engine is not None
-                    else None
-                ),
-            )
-            output = await run_tool(tool, context, params.arguments or {})
-            logger.info(
-                "mcp tool call", tool=tool.name, user_id=str(user.id), error=output.is_error
-            )
-            return types.CallToolResult(
-                content=[types.TextContent(type="text", text=output.content)],
-                is_error=output.is_error,
-            )
+            return await answer(params, request_id)
         finally:
             structlog.contextvars.unbind_contextvars("request_id")
+
+    async def answer(params: types.CallToolRequestParams, request_id: str) -> types.CallToolResult:
+        try:
+            user = await current_user()
+        except NotAuthenticatedError as exc:
+            return _error(exc.message)
+        # Only what the user is offered can be called: an auditor has no data tool.
+        tool = next((t for t in await offered_tools(user) if t.name == params.name), None)
+        if tool is None:
+            return _error(
+                f"Nincs ilyen eszköz, vagy ennek a felhasználónak nem elérhető: {params.name}"
+            )
+        context = ToolContext(
+            user=user,
+            retriever=backend.retriever,
+            metrics=backend.metrics,
+            sources=sources,
+            ask_database=await _database_asker(backend, user, request_id),
+            catalog=(
+                await backend.catalog_cache.get(backend.llm_engine)
+                if backend.llm_engine is not None
+                else None
+            ),
+        )
+        output = await run_tool(tool, context, params.arguments or {})
+        logger.info("mcp tool call", tool=tool.name, user_id=str(user.id), error=output.is_error)
+        return types.CallToolResult(
+            content=[types.TextContent(type="text", text=output.content)],
+            is_error=output.is_error,
+        )
 
     return Server(
         "finql",
@@ -235,8 +243,20 @@ async def serve_stdio(settings: Settings) -> None:
     stdout is the protocol's channel: the logs go to stderr (core/logging.py), and while the
     server runs the SDK points file descriptor 1 at stderr as well.
     """
+    # First of all: every log line to stderr. Unconfigured, structlog prints to stdout, and a
+    # line logged before the SDK takes over stdout would land in the protocol stream.
+    configure_logging(settings.log_level, json_logs=True)
     if settings.mcp_email is None or settings.mcp_password is None:
         raise NotAuthenticatedError("Hiányzik a FINQL_MCP_EMAIL vagy a FINQL_MCP_PASSWORD.")
+    configure_telemetry(settings)  # before the engines: they are traced only if created after
+    try:
+        await _serve(settings)
+    finally:
+        shutdown_telemetry()
+
+
+async def _serve(settings: Settings) -> None:
+    assert settings.mcp_email is not None and settings.mcp_password is not None
     async with open_backend(settings) as backend:
         user_id = await login(backend, settings.mcp_email, settings.mcp_password.get_secret_value())
         server = build_server(backend, user_id)

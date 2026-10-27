@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import structlog
+from opentelemetry.semconv._incubating.attributes import gen_ai_attributes as gen_ai
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from finql.agent.memory import (
@@ -41,6 +42,7 @@ from finql.agent.tools import (
 from finql.auth.models import User
 from finql.core.config import Settings
 from finql.core.errors import AppError
+from finql.core.telemetry import mark_error, set_attributes, traced_stream, tracer
 from finql.llm.chat import ChatModel, TextDelta, TurnResult
 from finql.llm.client import LLMClient, LLMError
 from finql.llm.prompts import load_prompt
@@ -99,7 +101,7 @@ def system_prompt() -> str:
     return load_prompt(PROMPT_VERSION)
 
 
-async def run_turn(
+def run_turn(
     agent: Agent,
     user: User,
     conversation_id: uuid.UUID,
@@ -108,6 +110,41 @@ async def run_turn(
     request_id: str | None = None,
     store: MessageSink | None = None,
     ask_database: AskDatabase | None = None,
+) -> AsyncIterator[AgentEvent]:
+    """The turn in one span: every model call, tool and query of it nests under this."""
+    span = tracer.start_span(
+        "invoke_agent finql",
+        attributes={
+            gen_ai.GEN_AI_OPERATION_NAME: gen_ai.GenAiOperationNameValues.INVOKE_AGENT.value,
+            gen_ai.GEN_AI_AGENT_NAME: "finql",
+            gen_ai.GEN_AI_CONVERSATION_ID: str(conversation_id),
+            "finql.user.role": user.role.value,
+            "finql.request_id": request_id or "",
+        },
+    )
+    return traced_stream(
+        span,
+        _run_turn(
+            agent,
+            user,
+            conversation_id,
+            question,
+            request_id=request_id,
+            store=store,
+            ask_database=ask_database,
+        ),
+    )
+
+
+async def _run_turn(
+    agent: Agent,
+    user: User,
+    conversation_id: uuid.UUID,
+    question: str,
+    *,
+    request_id: str | None,
+    store: MessageSink | None,
+    ask_database: AskDatabase | None,
 ) -> AsyncIterator[AgentEvent]:
     """Events: turn_start, then text / tool_start / tool_result as they happen, then done (with
     the checked answer and its sources) or error. Every step is stored as a message.
@@ -251,6 +288,13 @@ async def run_turn(
                     },
                     usage=turn.usage,
                 )
+                set_attributes(
+                    {
+                        "finql.tool_calls": calls_made,
+                        gen_ai.GEN_AI_USAGE_INPUT_TOKENS: tokens["input_tokens"],
+                        gen_ai.GEN_AI_USAGE_OUTPUT_TOKENS: tokens["output_tokens"],
+                    }
+                )
                 yield AgentEvent(
                     "done",
                     {
@@ -275,6 +319,7 @@ async def run_turn(
     except AppError as exc:  # LLMError, the token budget, TurnError
         error = exc if isinstance(exc, TurnError) else TurnError(exc.code, exc.message)
     logger.warning("agent turn failed", code=error.code, message=error.message)
+    mark_error(error.code)
     await store.add(MessageRole.ASSISTANT, {"error": error.code, "message": error.message})
     yield AgentEvent("error", {"code": error.code, "message": error.message})
 

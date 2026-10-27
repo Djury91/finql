@@ -12,9 +12,13 @@ from typing import Literal, Protocol
 
 import httpx2 as httpx
 import structlog
+from opentelemetry import trace
+from opentelemetry.semconv._incubating.attributes import gen_ai_attributes as gen_ai
+from opentelemetry.trace import SpanKind
 
 from finql.core.config import Settings
 from finql.core.errors import AppError
+from finql.core.telemetry import tracer
 
 logger = structlog.get_logger(__name__)
 
@@ -79,6 +83,18 @@ class VoyageEmbedder:
         return vectors
 
     async def _embed_batch(self, texts: Sequence[str], input_type: InputType) -> list[list[float]]:
+        attributes: dict[str, str | int] = {
+            gen_ai.GEN_AI_OPERATION_NAME: gen_ai.GenAiOperationNameValues.EMBEDDINGS.value,
+            gen_ai.GEN_AI_PROVIDER_NAME: "voyage_ai",
+            gen_ai.GEN_AI_REQUEST_MODEL: self._model,
+            gen_ai.GEN_AI_EMBEDDINGS_DIMENSION_COUNT: EMBEDDING_DIMENSIONS,
+        }
+        with tracer.start_as_current_span(
+            f"embeddings {self._model}", kind=SpanKind.CLIENT, attributes=attributes
+        ):
+            return await self._request(texts, input_type)
+
+    async def _request(self, texts: Sequence[str], input_type: InputType) -> list[list[float]]:
         started = time.perf_counter()
         payload = {
             "input": list(texts),
@@ -96,6 +112,10 @@ class VoyageEmbedder:
                 break
             wait = self._retry_wait(response, attempt)
             logger.warning("embedding request failed", status=response.status_code, retry_in=wait)
+            trace.get_current_span().add_event(
+                "retry" if wait is not None else "give up",
+                {"http.response.status_code": response.status_code},
+            )
             if wait is None:
                 raise EmbeddingError()
             await self._sleep(wait)
@@ -104,11 +124,14 @@ class VoyageEmbedder:
         vectors: list[list[float]] = [item["embedding"] for item in data]
         if len(vectors) != len(texts) or any(len(v) != EMBEDDING_DIMENSIONS for v in vectors):
             raise EmbeddingError("Az embedding-szolgáltatás váratlan választ adott.")
+        tokens = body.get("usage", {}).get("total_tokens")
+        if tokens is not None:
+            trace.get_current_span().set_attribute(gen_ai.GEN_AI_USAGE_INPUT_TOKENS, tokens)
         logger.info(
             "embedding call",
             model=self._model,
             texts=len(texts),
-            tokens=body.get("usage", {}).get("total_tokens"),
+            tokens=tokens,
             latency_ms=round((time.perf_counter() - started) * 1000),
         )
         return vectors

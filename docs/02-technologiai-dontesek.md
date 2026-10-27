@@ -383,6 +383,29 @@ kell mutatnia.
 - **Az SDK 2.x-es főverziója:** a `FastMCP` itt már `MCPServer`, a kezelők a konstruktorban
   regisztrálódnak. A kódot a telepített SDK-ból ellenőriztük, nem az 1.x-es mintákból.
 
+### ADR-014: Nyomkövetés – OpenTelemetry, a bank adatai nélkül
+
+- **Egy kérés egy nyom:** a FastAPI-kérés a gyökér, alatta az agent fordulója
+  (`invoke_agent`), az eszközök (`execute_tool`), a text-to-SQL lánc (`text_to_sql`,
+  `validate_sql`, `execute_sql`), a modell- és embeddinghívások és minden SQL-utasítás. Az MCP-n
+  az SDK `tools/call` spanja a gyökér. A GenAI szemantikus konvenciókat követjük, így egy
+  általános nézegető (Jaeger „GenAI View”) is érti.
+- **Amit a mások megcsinálnak, azt nem duplikáljuk:** az Anthropic SDK és az MCP SDK maga is
+  spanokat készít (modell, tokenek, cache, első darabig eltelt idő; MCP-metódus). Ezek a mi
+  spanjaink alá kerülnek, saját modellhívás-spant nem írunk.
+- **Nincs banki adat a nyomban:** se kérdés, se válasz, se dokumentum, se eredménysor. Az
+  Anthropic SDK-nál ezt kódban rögzítjük (`content_mode: metadata_only`), mert egy környezeti
+  változó különben bekapcsolhatná; a trace-fejlécet sem küldjük az API-nak. A nyom és a napló
+  között a `query_log` azonosítója a híd: a span eseménye, a tartalom a naplóban.
+- **Az adatbázis-spanok saját eseménykezelőből:** az OpenTelemetry SQLAlchemy-csomagja csak a
+  2.1 előtti SQLAlchemyt támogatja, és 2.1-gyel csendben semmit nem mér. A kurzor-eseményekre
+  írt kb. 40 sor verziófüggetlen, és csak az SQL szövegét rögzíti, a paramétereket nem.
+- **Stream span-kezelése:** az agent fordulója egy aszinkron generátor. Egy `with` blokk egy
+  `yield`-en át a span kontextusát a webszerver kódjában hagyná; a `traced_stream` a kontextust
+  csak a generátor saját lépéseire kapcsolja be.
+- **Kikapcsolva alapból:** `FINQL_OTEL_ENDPOINT` nélkül nincs exportőr és nincs mérés. Helyben
+  a Jaeger egy Compose-profil mögött fut, így az alap `docker compose up` nem változik.
+
 ### ADR-005: Fejlesztői eszközök
 
 | Terület | Választás | Miért |
@@ -418,5 +441,6 @@ kell mutatnia.
 | 011 | Kétlépcsős, nem root image; idempotens `setup`; Railway a saját pgvector-image-dzsel | Elfogadva |
 | 012 | Hash-láncolt `query_log` és `answer_log`: trigger az adatbázisban, külső horgony | Elfogadva |
 | 013 | MCP-szerver stdio-n: az agent eszközrétege, kérdés (nem SQL), egy felhasználó jogaival | Elfogadva |
+| 014 | OpenTelemetry-nyomkövetés: egy kérés egy nyom, a SDK-k spanjaival, banki adat nélkül | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

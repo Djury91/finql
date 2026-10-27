@@ -261,3 +261,33 @@ flowchart LR
   `query_log`-ba kerül, `mcp-` kezdetű kérésazonosítóval, és a napi tokenkeretbe számít.
 - **Források egy számozással:** egy munkamenetben egy dokumentumrészlet a száma végig ugyanaz,
   így a kliens modellje több keresés forrásaira is hivatkozhat egy válaszban.
+
+## 9. Nyomkövetés (8. fázis)
+
+![Egy agent-válasz nyoma a Jaegerben](img/trace.png)
+
+Egy kérés egy nyom (OpenTelemetry, ADR-014). A fenti nyom egy fiókvezető „kész, ha” kérdése a
+valódi modellel. A 11,6 másodpercből kb. 10 a három modellhívás; a lekérdezés EXPLAIN-nel
+együtt 82 ms, a dokumentumkeresés 0,3 s. Ezt a nyom nélkül csak becsülni lehetne.
+
+```
+POST /chat/conversations/{id}/messages        (FastAPI)
+└─ invoke_agent finql                          tokenek, eszközhívások száma
+   ├─ anthropic.messages.create                (Anthropic SDK: modell, tokenek, cache)
+   ├─ execute_tool query_database
+   │  └─ text_to_sql                           adatkör, query_log-azonosító (esemény)
+   │     ├─ embeddings voyage-4                (few-shot)
+   │     ├─ anthropic.messages.create
+   │     ├─ validate_sql
+   │     └─ execute_sql
+   │        ├─ EXPLAIN finql                   (költségőr)
+   │        └─ SELECT finql
+   ├─ execute_tool search_documents
+   └─ anthropic.messages.create                (a végső válasz)
+```
+
+- **Bekapcsolás:** `FINQL_OTEL_ENDPOINT=http://127.0.0.1:4318` és
+  `docker compose --profile observability up -d jaeger`; a felület: http://127.0.0.1:16686.
+- **A naplóhoz kötve:** a `text_to_sql` span minden kísérlethez egy `query_log` eseményt kap a
+  sor azonosítójával; a log minden sora a `trace_id`-t is viszi. A kérdés szövege a naplóban
+  van, a nyomban nincs.

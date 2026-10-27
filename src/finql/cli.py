@@ -11,6 +11,7 @@ from finql import __version__
 from finql.core.config import get_settings
 
 if TYPE_CHECKING:
+    from finql.audit.service import ChainStatus
     from finql.eval.retrieval import RetrievalOutcome
     from finql.rag.ingest import IngestResult
     from finql.text_to_sql.examples import SyncResult
@@ -216,6 +217,8 @@ examples_app = typer.Typer(help="Few-shot példák kezelése.", no_args_is_help=
 app.add_typer(examples_app, name="examples")
 eval_app = typer.Typer(help="A text-to-SQL minőségének mérése.", no_args_is_help=True)
 app.add_typer(eval_app, name="eval")
+audit_app = typer.Typer(help="A naplók ellenőrzése.", no_args_is_help=True)
+app.add_typer(audit_app, name="audit")
 
 
 @examples_app.command("sync")
@@ -465,3 +468,64 @@ async def _retrieval_outcomes(top_k: int) -> "tuple[list[RetrievalOutcome], str 
             await embedder.close()
         await engine.dispose()
     return outcomes, embedder.model if embedder is not None else None
+
+
+@audit_app.command("verify")
+def audit_verify(
+    anchor: Annotated[
+        Path | None,
+        typer.Option(
+            help="Horgonyfájl (JSON) a korábban rögzített láncfejekkel. Ha létezik, a fejeknek "
+            "még egyezniük kell; ha minden ép, a fájl a mostani fejekre frissül. Tartsd az "
+            "adatbázison kívül.",
+        ),
+    ] = None,
+) -> None:
+    """A hash-láncolt naplók (query_log, answer_log) ellenőrzése. Hibánál a kilépési kód 1."""
+    import json
+
+    anchors: dict[str, dict[str, object]] = {}
+    if anchor is not None and anchor.exists():
+        anchors = json.loads(anchor.read_text(encoding="utf-8"))
+    statuses, mismatches = asyncio.run(_verify_logs(anchors))
+
+    for status in statuses:
+        if status.intact:
+            head = f", fej: {status.head_seq} {status.head_hash}" if status.head_seq else ""
+            typer.echo(f"  {status.log:<12} ép: {status.checked} sor{head}")
+        else:
+            typer.echo(
+                f"  {status.log:<12} MEGSZAKAD a {status.broken_at}. sornál ({status.problem}), "
+                f"előtte {status.checked} sor ép"
+            )
+    for log, message in mismatches:
+        typer.echo(f"  {log:<12} HORGONY: {message}")
+
+    if mismatches or not all(status.intact for status in statuses):
+        raise typer.Exit(1)
+    if anchor is not None:
+        heads = {s.log: {"seq": s.head_seq, "hash": s.head_hash} for s in statuses if s.head_seq}
+        anchor.write_text(json.dumps(heads, indent=2) + "\n", encoding="utf-8")
+        typer.echo(f"Horgony frissítve: {anchor}")
+
+
+async def _verify_logs(
+    anchors: dict[str, dict[str, object]],
+) -> "tuple[list[ChainStatus], list[tuple[str, str]]]":
+    from finql.audit.service import anchor_mismatch, verify_chains
+    from finql.core.db import create_engine, create_sessionmaker
+
+    engine = create_engine(get_settings().database_url.get_secret_value())
+    try:
+        async with create_sessionmaker(engine)() as session:
+            statuses = await verify_chains(session)
+            mismatches = []
+            for log, head in anchors.items():
+                message = await anchor_mismatch(
+                    session, log, int(str(head["seq"])), str(head["hash"])
+                )
+                if message is not None:
+                    mismatches.append((log, message))
+    finally:
+        await engine.dispose()
+    return statuses, mismatches

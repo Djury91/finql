@@ -51,7 +51,8 @@ finql/
 │   ├── analytics/                 # nézetek, havi összesítő, 090_comments.sql, 099_ownership_grants.sql
 │   ├── security/                  # 001_app_ctx.sql (session-kontextus), 010_rls.sql (policy-k)
 │   ├── extensions/                # 001_pgvector.sql: a vector bővítmény (`finql db bootstrap`, superuser)
-│   └── app/                       # 000_schema.sql: az app séma és a finql_app alapjogai
+│   └── app/                       # 000_schema.sql: az app séma és a finql_app alapjogai; 010–030: append-only jogok;
+│                                  # 040_log_chain.sql: hash-lánc (trigger, ellenőrzés) a query_log-ra és az answer_log-ra
 │
 ├── migrations/                    # Alembic
 │   ├── env.py                     # SET ROLE finql_owner; include_name: a DB-first sémák kimaradnak az autogenerate-ből
@@ -65,7 +66,8 @@ finql/
 │       ├── 0006_sql_examples.py
 │       ├── 0007_eval_runs.py
 │       ├── 0008_documents_and_answer_log.py
-│       └── 0009_conversations_and_messages.py
+│       ├── 0009_conversations_and_messages.py
+│       └── 0010_log_hash_chain.py         # oszlopok code-first, a lánc DB-first; a meglévő sorok láncba fűzése
 │
 ├── src/finql/
 │   ├── __init__.py
@@ -155,9 +157,9 @@ finql/
 │   │   └── run.py                 # a CLI-parancsok összekötése (beállítások → futás → riport)
 │   │
 │   ├── audit/
-│   │   ├── router.py              # GET /audit/queries, /audit/conversations (auditor)
-│   │   ├── service.py             # log_query(...): saját tranzakcióban
-│   │   ├── models.py              # QueryLog
+│   │   ├── router.py              # GET /audit/queries, /audit/conversations, /audit/chain (auditor)
+│   │   ├── service.py             # log_query(...): saját tranzakcióban; verify_chains, anchor_mismatch
+│   │   ├── models.py              # QueryLog, HashChained (a lánc oszlopai)
 │   │   └── schemas.py
 │   │
 │   ├── web/                       # webes felület (ADR-010)
@@ -201,12 +203,13 @@ finql/
     └── integration/
         ├── test_security.py       # RLS (saját fiók / minden fiók / kontextus nélkül 0 sor), írás, PII
         ├── test_analytics.py      # példakérdések, leírások teljessége, konzisztencia
-        ├── test_readonly.py       # írás az llm_reader szerepkörrel → hiba
+        ├── test_executor.py       # írás az llm_reader szerepkörrel → hiba, időkorlát, sorlimit
         ├── test_query_api.py
         ├── test_examples.py       # few-shot: sync, kiválasztás, prompt és napló
         ├── test_eval.py           # orákulum: 100%; szkriptelt válaszok bírálata
         ├── test_rag.py            # betöltés, hibrid keresés, olvasási szint, idézett válasz, napló
-        └── test_agent.py          # SSE, eszközök, korlátok, memória, keret, zár, mérgezett dokumentum
+        ├── test_agent.py          # SSE, eszközök, korlátok, memória, keret, zár, mérgezett dokumentum
+        └── test_audit_chain.py    # hash-lánc: egyidejű írók, módosítás/törlés/átkötés, horgony, CLI
 ```
 
 ## Konvenciók

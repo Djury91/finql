@@ -276,8 +276,26 @@ nyilvános telepítéshez Railway-fiók kell; a konfiguráció és a lépések k
 ## 8. fázis – Haladó (válogatható)
 
 - [ ] OpenTelemetry-trace (FastAPI → LLM → DB), vagy Langfuse az LLM-hívásokhoz
-- [ ] Hash-láncolt `query_log` (`prev_hash`, `row_hash`): a naplóból törölt vagy módosított sor kimutatható
+- [x] Hash-láncolt `query_log` (`prev_hash`, `row_hash`): a naplóból törölt vagy módosított sor kimutatható (az `answer_log` is; ADR-012)
 - [ ] MCP-szerver: a `query_database` és a `search_documents` eszköz MCP-n keresztül, így Claude Desktopból is használható
 - [ ] Szemantikus válasz-cache (hasonló kérdés + ugyanaz a szerepkör → cache-elt SQL)
 - [ ] Materializált nézetek frissítése ütemezve, adatfrissességi metaadat a válaszban
 - [ ] Django + Django Ninja változat egy moduljáról, összehasonlító jegyzettel
+
+**Állapot – hash-láncolt napló:** a `query_log` és az `answer_log` sorait egy trigger fűzi
+láncba (`chain_seq`, `prev_hash`, `row_hash`); a migráció a meglévő sorokat is láncba fűzte.
+Ellenőrzés: `GET /audit/chain` (auditor, admin) és `finql audit verify --anchor` (külső
+horgonnyal, ütemezhető, hibánál 1-es kilépési kód). 12 integrációs teszt: egyidejű írók, módosítás,
+törlés, átkötés, session-beállítások, új oszlop, horgony, végpont, CLI.
+
+**Tanulságok – hash-láncolt napló:**
+- A láncot az adatbázis építi, nem az alkalmazás: amit az alkalmazás a lánc oszlopaiba küld,
+  felülíródik. Így a lánc a legkisebb jogú író hibáitól is független.
+- A sor szöveges alakja session-beállításfüggő (időzóna, float, bytea): ugyanaz a sor más
+  hash-t adott volna egy másik időzónájú sessionben. A függvények ezért rögzítik a beállításokat,
+  és egy teszt idegen beállításokkal ellenőriz.
+- Egy új oszlop az összes régi sor hash-ét megváltoztatta volna (a JSON-alakban új kulcs). A
+  `NULL` értékek ezért kimaradnak a hash-ből; ezt a döntés leírása közben vettem észre, nem
+  tesztből, ezért utólag teszt is lett rá.
+- A lánc önmagában nem véd a teljes újraírás és a végéről törlés ellen: ehhez külső horgony
+  kell. A naplót nem az teszi hitelessé, hogy láncolt, hanem hogy a feje máshol is megvan.

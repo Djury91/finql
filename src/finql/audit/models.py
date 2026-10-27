@@ -7,11 +7,13 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    FetchedValue,
     Float,
     ForeignKey,
     Identity,
     Index,
     Integer,
+    LargeBinary,
     SmallInteger,
     Text,
     func,
@@ -34,9 +36,34 @@ class QueryStatus(enum.StrEnum):
     LLM_ERROR = "llm_error"
 
 
-class QueryLog(Base):
+class HashChained:
+    """A log whose rows form a hash chain (db/app/040_log_chain.sql): a row changed, deleted or
+    inserted afterwards breaks it from that point on.
+
+    The database fills all three columns in a trigger, under a lock, whatever the application
+    sends: a faulty or bypassed application cannot write a wrong chain.
+    """
+
+    chain_seq: Mapped[int] = mapped_column(
+        BigInteger,
+        server_default=FetchedValue(),
+        comment="Sorszám a hash-láncban: hézag nélkül 1-től (trigger tölti).",
+    )
+    prev_hash: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        server_default=FetchedValue(),
+        comment="Az előző sor row_hash-e; az első soré 32 nulla bájt.",
+    )
+    row_hash: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        server_default=FetchedValue(),
+        comment="SHA-256 a sor tartalmára és a prev_hash-re (app.log_row_hash).",
+    )
+
+
+class QueryLog(HashChained, Base):
     """Every text-to-SQL attempt, the rejected ones too. Append-only: the application role may
-    insert and read, but not change or delete (db/app/010_query_log.sql)."""
+    insert and read, but not change or delete (db/app/010_query_log.sql). Hash-chained."""
 
     __tablename__ = "query_log"
     # Newest first is a backward scan of these, no DESC needed.
@@ -50,6 +77,8 @@ class QueryLog(Base):
         Index(None, "user_id", "created_at"),
         # The auditor's list: everyone's rows.
         Index(None, "created_at"),
+        # One row per position: two concurrent writers cannot fork the chain unnoticed.
+        Index(None, "chain_seq", unique=True),
         {
             "comment": (
                 "Text-to-SQL napló: minden kísérlet egy sor, az elutasítottak is. "

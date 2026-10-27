@@ -188,16 +188,37 @@ recall és a Claude-dal adott válaszok API-kulcsra várnak.
 
 **Cél:** egy beszélgetésben SQL és dokumentum együtt, valós idejű válasszal.
 
-- [ ] `Conversation`, `Message` modellek
-- [ ] `agent/tools.py`: `query_database`, `search_documents`, `describe_schema`, `get_metric_definition`, mindegyik Pydantic-sémával
-- [ ] Tool-use ciklus: max. 6 hívás, tokenkeret, időkorlát, hibakezelés eszközönként
-- [ ] Beszélgetés-memória: az utolsó N üzenet, hosszabb beszélgetésnél összefoglaló (Haiku)
-- [ ] SSE-stream: szövegdarabok és eszközhívás-események (`tool_start`, `tool_result`)
-- [ ] Indirekt prompt injection teszt: mérgezett dokumentum, az agent nem követi
-- [ ] Vegyes eval-kérdések (SQL + dokumentum)
+- [x] `Conversation`, `Message` modellek (a `messages` csak hozzáfűzhető, a `query_log` kap `conversation_id`-t)
+- [x] `agent/tools.py`: `query_database`, `search_documents`, `describe_schema`, `get_metric_definition` (`data/metrics.yaml`), mindegyik Pydantic-sémával; az eszközkészlet szerepkörfüggő
+- [x] Tool-use ciklus: max. 6 hívás, tokenkeret minden modellhívás előtt, határidő az egész üzenetre, hibakezelés eszközönként (ADR-009)
+- [x] Beszélgetés-memória: kérdések és végső válaszok; 8 forduló fölött összefoglaló (Haiku), a legutóbbi fele szó szerint
+- [x] SSE-stream: `turn_start`, `text`, `tool_start`, `tool_result`, `done`, `error`; egy beszélgetésben egyszerre egy válasz (advisory lock, 409)
+- [x] Indirekt prompt injection teszt: mérgezett dokumentum; egy azt követő modell sem kap több jogot (szkriptelt teszt), és a valódi modell nem követi (élő teszt, API-kulcsra vár)
+- [x] Vegyes eval-kérdések (SQL + dokumentum): `finql eval agent`, 10 kérdés (eszközök, idézett dokumentum, szám a válaszban, szivárgás, prompt-kinyerés)
+- [ ] Élő próba és eval Claude-dal: a „kész, ha” kérdés streamelve, és a 10 kérdés eredménye (API-kulcsra vár)
 
 **Kész, ha:** „Hány 90+ napos késedelmes hitelünk van, és mi a teendő a szabályzat szerint?”
 egy válaszban, számmal és idézettel érkezik, streamelve.
+
+**Állapot:** a teljes út kész és tesztelt: a beszélgetés, a stream, az eszközök a felhasználó
+jogaival, a korlátok, a memória és az összefoglaló, a napló. A „kész, ha” kérdés API-kulcs
+nélkül is végigfut: a demóterv a pécsi fiókvezetőnek a saját fiókja számát adja, és a
+követeléskezelési szabályzatot idézi, streamelve. A valódi modellel ugyanez élő tesztként és az
+agent evaljaként fut, kulcsra vár.
+
+**Tanulságok:**
+- A tool runner helyett saját ciklus: minden lépést tárolni, költségkeretre ellenőrizni és
+  streamelni kell, és a ciklusnak szkriptelt modellel is futnia kell a tesztekben. A
+  szolgáltatói réteg így egyetlen streamelt fordulóra szűkül.
+- A memória a kérdés és a végső válasz, nem a teljes átirat. A korábbi eszközeredmények
+  elavulnak, és sok tokenbe kerülnek; a gondolkodási blokkok csak a fordulón belül kellenek.
+  Egy visszakérdezés újra hívja az eszközöket.
+- A streamelt szöveg hivatkozásai már elmentek, mire a kód ellenőrizni tudja őket. Ezért a
+  `done` esemény hozza a végleges, ellenőrzött választ, és a kliens azt mutatja.
+- Az időkorlát nem foghat át `yield`-et: az, hogy a kliens mennyi idő alatt olvas, nem a modell
+  ideje. A határidőt minden várakozásra külön alkalmazzuk.
+- Amit a stream előtt el lehet dönteni (jogosultság, keret, foglalt beszélgetés), azt
+  függőségben döntjük el: a stream megkezdése után a státuszkód már 200.
 
 ---
 

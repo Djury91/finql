@@ -402,7 +402,7 @@ questions:
       GROUP BY t.merchant_name ORDER BY spend_huf DESC LIMIT 10
 
   - id: branch_card_growth_q3
-    question: Melyik fiókban nőtt a legjobban a kártyás költés 2026 harmadik negyedévében az előzőhöz képest?
+    question: Melyik fiókban nőtt százalékosan a legjobban a kártyás költés 2026 harmadik negyedévében az előzőhöz képest?
     difficulty: hard
     tags: [aggregation, join, time, window, ranking]
     note: Seed-történet 1, a Debreceni fiók.
@@ -490,7 +490,7 @@ questions:
       ) c
 
   - id: leisure_spend_share_by_segment_2025
-    question: A prémium és a lakossági ügyfelek 2025-ös kártyás költésének hány százaléka ment éttermekre, szállásra és utazásra?
+    question: A prémium és a lakossági ügyfelek 2025-ös kártyás költésének szegmensenként hány százaléka ment éttermekre, szállásra és utazásra?
     difficulty: hard
     tags: [aggregation, join, time]
     note: Seed-történet 5.

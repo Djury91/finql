@@ -1,8 +1,10 @@
 """A few questions through the real Claude API: does the prompt work with the real model?
 
-Skipped without an API key (CI, fresh clones). With a key it costs a few cents a run:
+Only on request, because a run costs a few cents: plain `pytest` (and `poe check`) deselects them
+even with a key in .env. Run them with:
     uv run poe test-llm
-The systematic measurement (50 golden questions, accuracy) is the eval of phase 4.
+Without a key they are skipped (CI, fresh clones). The systematic measurement (50 golden
+questions, accuracy) is the eval of phase 4.
 """
 
 import asyncio

@@ -70,7 +70,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers", "-ra"]
+# The live tests cost money: they run only when asked for (`poe test-llm`, a later -m wins).
+addopts = ["--strict-markers", "-ra", "-m", "not llm"]
 markers = [
     "integration: valódi Postgres-t indít (Docker kell hozzá)",
     "llm: a valódi Anthropic API-t hívja (API-kulcs kell, pénzbe kerül)",

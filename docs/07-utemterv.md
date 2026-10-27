@@ -128,9 +128,9 @@ hoz vissza adatot. A rendszeres mérés a 4. fázis evalja.
 
 **Állapot:** a harness kész és tesztelt. Az orákulummal (az elvárt SQL-t visszaadó ál-LLM) a
 `small` skálán 50/50 és 20/20, vagyis a kérdéssorok, a hatókörök, az összevetés, a tárolás és a
-riport rendben van. A valódi mérés (2026-10-27, Claude Sonnet 5.5, `voyage-4`): **48/50 (96%)**
-few-shot nélkül és 3 példával is, **20/20** elutasítás, 100% érvényes SQL, p50 3,0 s. A riportok:
-`eval/reports/published/`.
+riport rendben van. A valódi mérés (2026-10-27, Claude Sonnet 5.5, `voyage-4`): a pontosított
+arany soron **49/50 (98%)** 3 példával és 48/50 (96%) nélküle, **20/20** elutasítás, 100% érvényes
+SQL, p50 3,2 s. A riportok: `eval/reports/published/`.
 
 **Tanulságok:**
 - A kérdéssor megírása két korábbi hibát hozott elő, még mielőtt egy modell válaszolt volna.
@@ -146,13 +146,17 @@ few-shot nélkül és 3 példával is, **20/20** elutasítás, 100% érvényes S
   adott; a kérdés kategóriákra változott. A rangsorok határán nincs holtverseny (ellenőrizve).
 - A few-shot példák a felhasználói üzenetbe kerülnek: a rendszerprompt így bájtra ugyanaz
   marad, és cache-elhető (ADR-007).
-- A dinamikus few-shot a Sonnet 5.5-tel nem javított mérhetően (48/50 mindkét futásban, más-más
-  hibával), és ~7%-kal több tokenbe kerül. Egy erős modellnél a séma kommentjei és a szabályok
-  többet adnak, mint a példák; a few-shot ott segíthet, ahol a modell gyengébb, vagy a házi
-  szokás nem következik a sémából.
-- A valódi modell hibáinak fele a kérdéssor hibája volt: két kérdés kétértelmű („legjobban
-  nőtt”: abszolút vagy százalékos; „prémium és lakossági”: együtt vagy szegmensenként). A
-  hibás válaszokat ezért egyenként kell elolvasni, mielőtt a promptot javítjuk.
+- Az első valódi mérés hibáinak fele a kérdéssor hibája volt: két kérdés kétértelmű
+  („legjobban nőtt”: abszolút vagy százalékos; „prémium és lakossági”: együtt vagy
+  szegmensenként). A hibás válaszokat ezért egyenként kell elolvasni, mielőtt a promptot
+  javítjuk. A pontosítás után a modell few-shot nélkül is helyesen felelt rájuk.
+- A kérdést csak addig szabad pontosítani, amíg egy helyes válasza van; utána a modell hibája
+  marad hiba. A „szegmensenként” után a few-shottal futó változat kategóriánként három
+  százalékot adott egy helyett: ezt nem fogalmaztuk tovább, mert a kérdés egy arányt kér.
+- A dinamikus few-shot összesítve alig javít (49/50 vs. 48/50, ~7%-kal több tokenért), de a
+  házi szokásban igen: az „utolsó negyedév” a lezárt III. negyedév, és ezt few-shottal két
+  futásból kétszer, nélküle egyszer sem találta el. Erős modellnél a séma kommentjei és a
+  szabályok adják a legtöbbet; a példa ott segít, ahol a helyes válasz nem következik a sémából.
 
 ---
 

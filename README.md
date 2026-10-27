@@ -202,7 +202,7 @@ hívja, mint bármely más kliens. A döntések: [ADR-010](docs/02-technologiai-
 |---|---|
 | `uv run poe check` | Lint, formázás, típusellenőrzés, tesztek (ugyanaz, mint a CI) |
 | `uv run poe test-unit` | Tesztek Docker nélkül |
-| `uv run poe test-llm` | Néhány kérdés a valódi Claude-dal (API-kulcs kell, pár cent) |
+| `uv run poe test-llm` | Néhány kérdés a valódi Claude-dal (API-kulcs kell, pár cent). A `poe check` ezeket nem futtatja |
 | `uv run poe db-down` | Postgres leállítása (az adat megmarad) |
 | `uv run pre-commit install` | Git-hookok bekapcsolása |
 
@@ -210,13 +210,13 @@ hívja, mint bármely más kliens. A döntések: [ADR-010](docs/02-technologiai-
 
 | Mérés | Kulcs nélkül | Claude Sonnet 5.5 + Voyage 4 |
 |---|---|---|
-| Text-to-SQL, 50 arany kérdés (végrehajtási pontosság) | 50/50 az orákulummal: a harness önellenőrzése | **48/50 (96%)**, few-shottal és nélküle is; 100% érvényes SQL |
+| Text-to-SQL, 50 arany kérdés (végrehajtási pontosság) | 50/50 az orákulummal: a harness önellenőrzése | **49/50 (98%)** few-shottal, 48/50 (96%) nélküle; 100% érvényes SQL |
 | 20 rosszindulatú kérdés (nem jöhet vissza adat) | 20/20 az orákulummal | **20/20** |
 | Dokumentumkeresés, recall@5 · MRR | 17/17 · 0,75 (hash-alapú embedding) | **17/17 · 0,94** |
 | Belső dokumentum fiókvezetőnek (szivárgás) | 0 a 3 próbán | **0** a 3 próbán |
 | Agent, 10 vegyes kérdés (eszközök, idézet, helyes szám) | 4/10 a fix tervvel, 0 biztonsági hiba: csak a harness próbája | **10/10**, 0 biztonsági hiba, 2,0 eszközhívás/kérdés |
-| Késleltetés p50 / p95 | – | text-to-SQL 3,0 / 4,9 s; agent 8,0 / 13,7 s |
-| Token / kérdés | – | text-to-SQL ~7 100; agent ~12 600 |
+| Késleltetés p50 / p95 | – | text-to-SQL 3,2 / 5,1 s; agent 8,0 / 13,7 s |
+| Token / kérdés | – | text-to-SQL ~7 200 (few-shottal ~7 700); agent ~12 600 |
 | Tesztek | 594 (unit + valódi Postgres testcontainersszel), és a `docker compose up` füstpróbája; CI-ban minden PR-en | + 8 élő teszt a valódi modellel, köztük a mérgezett dokumentum: 8/8 |
 
 A kulcs nélküli számok azt mutatják, hogy a mérőeszközök helyesen mérnek; a modell minőségét a
@@ -224,13 +224,18 @@ jobb oldali oszlop mondja meg. A mérés napja 2026-10-27, `small` skála; a rip
 [`eval/reports/published/`](eval/reports/published/). Újramérés: `uv run finql eval run`,
 `finql eval retrieval`, `finql eval agent`, vagy a GitHubon az `eval.yml` workflow.
 
-**Few-shot nélkül és dinamikus few-shottal** ([összevetés](eval/reports/published/2026-10-27-few-shot-compare.md)):
-mindkettő 48/50, de más-más kérdésen hibázik, a few-shot ~7%-kal több tokent visz el. Ezen a
-kérdéssoron és ezzel a modellel a few-shot nem javít mérhetően. A négy hibás válaszból kettő
-kétértelmű kérdés: a „legjobban nőtt” lehet abszolút vagy százalékos növekedés, és a
-„prémium és lakossági” lehet együtt vagy szegmensenként. A másik kettő valódi modellhiba: az
-„utolsó negyedév” a befejezett III. negyedév helyett a II. lett, és a lejárt tartozásból
-kimaradtak a nem aktív hitelek.
+**Few-shot nélkül és dinamikus few-shottal** ([összevetés](eval/reports/published/2026-10-27-golden-pontositott-few-shot-compare.md)):
+few-shottal 49/50, nélküle 48/50, ~7%-kal több tokenért. Egy kérdésnyi különbség egy-egy
+futásnál a zaj határán van, de egy mintázat két mérésen is megismétlődött: hogy az „utolsó
+negyedév” a lezárt III. negyedév, azt a modell few-shottal mindkétszer eltalálta, nélküle
+egyszer sem. Ez házi szokás, nem következik a sémából; ebben segít a példa.
+
+Az első mérésen ([összevetés](eval/reports/published/2026-10-27-few-shot-compare.md)) mindkét
+változat 48/50 volt, és a hibák fele a kérdéssor hibája: két arany kérdés kétértelmű volt
+(„legjobban nőtt”: abszolút vagy százalékos; „prémium és lakossági”: együtt vagy
+szegmensenként). A két kérdést pontosítottuk, és az arany sort újramértük; a pontosított
+kérdésekre a modell few-shot nélkül helyesen felelt. A rosszindulatú sor nem változott, az
+eredménye az első mérésből való.
 
 ## Tanulságok
 

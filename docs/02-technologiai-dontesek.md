@@ -363,6 +363,26 @@ kell mutatnia.
   ismernie kellene, így a nagyobb jogú támadó is ismerné). Ha a fenyegetés ezt kívánja, a
   horgony helyére egy aláírt, külső tár léphet; a lánc változatlan marad.
 
+### ADR-013: MCP-szerver – stdio, az agent eszközrétege, egy felhasználó
+
+- **Ugyanaz az eszközréteg, mint az agenté:** a `Tool`, a `run_tool` és a `tools_for`
+  változatlanul szolgál ki egy MCP-klienst. A jogosultság, a bemenet-ellenőrzés, a napló és a
+  tokenkeret így nem kétszer van megírva, és nem térhet el. Az alacsony szintű `Server`-t
+  használjuk, nem az `MCPServer`-t: az eszközök sémája már Pydantic-modell, a dekorátoros
+  regisztráció csak egy második leírást adna ugyanarról.
+- **Kérdés, nem SQL:** a kliens modellje (Claude Desktop) nem kap SQL-eszközt. Egy
+  `run_sql` eszköz kényelmes lenne, de egy idegen modellt engedne közvetlenül a validátorhoz, a
+  saját promptunk és a few-shot nélkül; a `query_database` a teljes text-to-SQL láncon megy át.
+- **stdio, egy felhasználó, környezeti változóból:** az MCP-kliens indítja a szervert, és a
+  konfigurációjában adja meg a FinQL-felhasználót. A szerver indításkor ugyanúgy bejelentkezik,
+  mint a `/auth/token`, és minden kérés előtt újraolvassa a felhasználót.
+- **Elvetve (egyelőre): távoli HTTP-szerver.** Az MCP távoli hitelesítése OAuth 2.1-es
+  engedélyezési szervert vár; a meglévő 30 perces JWT ehhez nem elég, egy saját OAuth-szerver
+  pedig túlnő ezen a projekten. Az eszközréteg ugyanaz maradna, csak a szállítás és a
+  hitelesítés cserélődne (`streamable_http_app` a FastAPI alá).
+- **Az SDK 2.x-es főverziója:** a `FastMCP` itt már `MCPServer`, a kezelők a konstruktorban
+  regisztrálódnak. A kódot a telepített SDK-ból ellenőriztük, nem az 1.x-es mintákból.
+
 ### ADR-005: Fejlesztői eszközök
 
 | Terület | Választás | Miért |
@@ -397,5 +417,6 @@ kell mutatnia.
 | 010 | Webes felület: statikus oldal és szkript build nélkül, csak szövegcsomópontok, szigorú CSP | Elfogadva |
 | 011 | Kétlépcsős, nem root image; idempotens `setup`; Railway a saját pgvector-image-dzsel | Elfogadva |
 | 012 | Hash-láncolt `query_log` és `answer_log`: trigger az adatbázisban, külső horgony | Elfogadva |
+| 013 | MCP-szerver stdio-n: az agent eszközrétege, kérdés (nem SQL), egy felhasználó jogaival | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

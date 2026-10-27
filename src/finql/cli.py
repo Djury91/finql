@@ -529,3 +529,18 @@ async def _verify_logs(
     finally:
         await engine.dispose()
     return statuses, mismatches
+
+
+@app.command()
+def mcp() -> None:
+    """MCP-szerver stdio-n (Claude Desktop, Claude Code): az agent eszközei a FINQL_MCP_EMAIL
+    felhasználó jogaival. Az MCP-kliens indítja, nem kézzel."""
+    from finql.core.errors import NotAuthenticatedError
+    from finql.mcp.server import serve_stdio
+
+    try:
+        asyncio.run(serve_stdio(get_settings()))
+    except NotAuthenticatedError as exc:
+        # stderr: the client shows it in its log; stdout belongs to the protocol.
+        typer.echo(f"Az MCP-szerver nem indult: {exc.message}", err=True)
+        raise typer.Exit(1) from exc

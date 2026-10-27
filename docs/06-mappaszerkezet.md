@@ -73,7 +73,7 @@ finql/
 │   ├── __init__.py
 │   ├── main.py                    # FastAPI app factory, lifespan (pool-ok, katalógus-cache)
 │   ├── health.py                  # /health (liveness), /ready (DB-ping, 503 ha nem elérhető)
-│   ├── cli.py                     # typer: db bootstrap, seed, user create/demo, examples sync, eval run/compare, ingest
+│   ├── cli.py                     # typer: db bootstrap, seed, user create/demo, examples sync, eval run/compare/retrieval/agent, ingest, audit verify, mcp
 │   ├── models.py                  # minden ORM-modul egy helyen (Alembic target_metadata)
 │   │
 │   ├── core/                      # közös infrastruktúra, nincs benne üzleti logika
@@ -162,6 +162,9 @@ finql/
 │   │   ├── models.py              # QueryLog, HashChained (a lánc oszlopai)
 │   │   └── schemas.py
 │   │
+│   ├── mcp/
+│   │   └── server.py              # MCP-szerver stdio-n: az agent eszközei egy felhasználó jogaival (ADR-013)
+│   │
 │   ├── web/                       # webes felület (ADR-010)
 │   │   ├── router.py              # GET / (CSP-fejlécekkel), GET /web/config
 │   │   └── static/                # index.html, app.js (SSE-olvasó, csak szövegcsomópontok), app.css
@@ -209,7 +212,8 @@ finql/
         ├── test_eval.py           # orákulum: 100%; szkriptelt válaszok bírálata
         ├── test_rag.py            # betöltés, hibrid keresés, olvasási szint, idézett válasz, napló
         ├── test_agent.py          # SSE, eszközök, korlátok, memória, keret, zár, mérgezett dokumentum
-        └── test_audit_chain.py    # hash-lánc: egyidejű írók, módosítás/törlés/átkötés, horgony, CLI
+        ├── test_audit_chain.py    # hash-lánc: egyidejű írók, módosítás/törlés/átkötés, horgony, CLI
+        └── test_mcp.py            # MCP: eszközök szerepkörönként, adatkör, napló, letiltás, stdio-alfolyamat
 ```
 
 ## Konvenciók

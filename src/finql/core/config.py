@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     # ADR-004: the cheap model for the cheap task (conversation summary).
     summary_model: str = "claude-haiku-5-5"
 
+    # --- MCP server (`finql mcp`, ADR-013) ---
+    # The FinQL user the server acts as: every tool runs with this user's rights, like the API.
+    # The MCP client (e.g. Claude Desktop) passes them in its server configuration.
+    mcp_email: str | None = None
+    mcp_password: SecretStr | None = None
+
     @property
     def json_logs(self) -> bool:
         return self.log_json if self.log_json is not None else self.env != "dev"

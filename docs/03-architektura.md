@@ -236,3 +236,28 @@ flowchart LR
 - **Telepítés:** egy image két paranccsal (`serve`, `setup`). Az alkalmazás csak a sikeres
   `setup` után indul: Compose-ban függőségként, PaaS-on pre-deploy lépésként (ADR-011,
   [08 – Telepítés](08-telepites.md)).
+
+## 8. MCP-szerver (8. fázis)
+
+```mermaid
+flowchart LR
+    C[MCP-kliens<br/>Claude Desktop, Claude Code] -->|stdio| S[finql mcp<br/>egy felhasználó jogaival]
+    S --> T[agent/tools.py<br/>ugyanazok az eszközök]
+    T -->|query_database| SQL[text-to-SQL lánc<br/>validátor · költségőr · RLS · napló]
+    T -->|search_documents| R[hibrid keresés<br/>olvasási szint]
+    SQL --> PG[(PostgreSQL)]
+    R --> PG
+```
+
+- **Ugyanaz az eszközréteg, mint az agenté** (`finql/mcp/server.py`, ADR-013): a szerepkörhöz
+  tartozó eszközkészlet, a Pydantic-bemenetek ellenőrzése, a hibák hibaeredményként. A
+  modellt a kliens hozza; a szerveren csak az eszközök futnak.
+- **Egy felhasználó, minden kérés előtt újraolvasva:** a szerver indításkor bejelentkezik
+  (`FINQL_MCP_EMAIL`, `FINQL_MCP_PASSWORD`, ugyanaz az ellenőrzés, mint a `/auth/token`), és
+  minden kérés előtt újraolvassa a felhasználót: a letiltás vagy a szerepkör változása azonnal
+  hat.
+- **Nincs SQL-eszköz:** a `query_database` kérdést kap, nem SQL-t. A kliens modellje így sem
+  kerülheti meg a validátort, a költségőrt és a csak olvasó szerepkört. Minden hívás a
+  `query_log`-ba kerül, `mcp-` kezdetű kérésazonosítóval, és a napi tokenkeretbe számít.
+- **Források egy számozással:** egy munkamenetben egy dokumentumrészlet a száma végig ugyanaz,
+  így a kliens modellje több keresés forrásaira is hivatkozhat egy válaszban.

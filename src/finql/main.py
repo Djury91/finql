@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import structlog
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from finql import __version__, health
 from finql.agent.demo import DemoSummaryClient, demo_agent_model
@@ -26,6 +27,8 @@ from finql.text_to_sql.demo import demo_llm_client
 from finql.text_to_sql.examples import build_example_selector
 from finql.text_to_sql.router import router as text_to_sql_router
 from finql.text_to_sql.schema_context import CatalogCache
+from finql.web.router import STATIC_DIR
+from finql.web.router import router as web_router
 
 logger = structlog.get_logger(__name__)
 
@@ -116,4 +119,6 @@ def create_app(
     app.include_router(rag_router)
     app.include_router(agent_router)
     app.include_router(audit_router)
+    app.include_router(web_router)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app

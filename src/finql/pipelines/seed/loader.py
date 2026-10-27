@@ -94,9 +94,14 @@ def load(
     *,
     seed: int = 42,
     reset: bool = False,
+    if_empty: bool = False,
     progress: Progress = lambda _: None,
 ) -> dict[str, int]:
-    """Generate the data set and load it into the `bank` schema in a single transaction."""
+    """Generate the data set and load it into the `bank` schema in a single transaction.
+
+    `if_empty`: data already there is not an error, nothing is loaded (an empty dict comes back).
+    The container's setup runs on every start and must not fail on the second one.
+    """
     progress(f"Generálás: {scale.name} ({scale.customers} ügyfél, {scale.months} hónap)…")
     generator = SeedGenerator(scale, seed)
     counts: dict[str, int] = {}
@@ -106,6 +111,9 @@ def load(
         # The generator writes local wall-clock times; this makes them Budapest time.
         conn.execute("SET TIME ZONE 'Europe/Budapest'")
         if _has_data(conn):
+            if if_empty and not reset:
+                progress("A bank séma már tartalmaz adatot, a betöltés kimarad.")
+                return counts
             if not reset:
                 raise SeedError("A bank séma már tartalmaz adatot. Újratöltés: --reset")
             progress("Meglévő adatok törlése…")

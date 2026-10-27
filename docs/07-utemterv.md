@@ -224,11 +224,35 @@ agent evaljaként fut, kulcsra vár.
 
 ## 7. fázis – UI, telepítés, demó
 
-- [ ] Minimális webes felület: chat, SQL megjelenítése, eredménytábla, forrás-idézetek. (Javaslat: HTMX + Jinja a FastAPI-ból, vagy egy külön Streamlit-kliens.)
-- [ ] `Dockerfile` (többlépcsős, nem-root), `docker compose up` egy paranccsal
-- [ ] Telepítés egy PaaS-ra (pl. Fly.io, Railway vagy Render) menedzselt Postgresszel, ahol elérhető a pgvector
-- [ ] Demó GIF/videó, architektúraábra, eval-eredmények a README-ben
-- [ ] „Tanulságok” szakasz a README-ben
+**Cél:** egy kattintható demó, amely egy paranccsal elindul, és egy PaaS-on is futhat.
+
+- [x] Webes felület (`web/static/`, ADR-010): bejelentkezés, beszélgetések, a válasz streamelve; eszközhívásonként a kérdés, a futtatott SQL, az eredménytábla, a talált források; a végén az ellenőrzött válasz `[n]` hivatkozásokkal. Statikus oldal build lépés nélkül, csak szövegcsomópontokból, szigorú CSP-vel. (HTMX helyett: az SSE egy `POST`-ra jön, azt az `EventSource` nem tudja.)
+- [x] `Dockerfile` (kétlépcsős, uv, nem root), `docker compose up` egy paranccsal: `db` → `setup` (szerepkörök, migrációk, adatok, demófelhasználók, dokumentumok; idempotens) → `app`
+- [x] PaaS-konfiguráció: `railway.json` (pre-deploy `setup`, `/ready`), lépésenkénti leírás (`docs/08-telepites.md`), Fly.io és Render változattal
+- [ ] Telepítés a Railway-re (fiók kell hozzá; a lépések a 08-as dokumentumban)
+- [x] Demó GIF és képernyőkép (`scripts/capture_demo.py`, Playwright), architektúraábra és eval-eredmények a README-ben
+- [x] „Tanulságok” szakasz a README-ben
+
+**Kész, ha:** `cp .env.example .env && docker compose up` után a böngészőben egy fiókvezető
+megkérdezi a „kész, ha” kérdést, és streamelve látja az SQL-t, az eredményt és az idézett
+szabályzatot.
+
+**Állapot:** üres adatbázisról a `docker compose up` ~1,5 perc alatt indul (ebből ~1 perc a
+2 millió tranzakció). A második indításkor a `setup` semmit nem tölt be újra. A felület a
+konténerből kulcs nélkül végigviszi a „kész, ha” kérdést; a README GIF-je így készült. A
+nyilvános telepítéshez Railway-fiók kell; a konfiguráció és a lépések készen vannak.
+
+**Tanulságok:**
+- Az `EventSource` csak `GET`-et küld, és fejlécet sem tud: egy `POST`-ra jövő, JWT-vel
+  védett streamhez `fetch` és egy 30 soros SSE-olvasó kell. Ez dönti el a felület
+  technológiáját is: ha úgyis kell szkript, a szerveroldali sablon csak második réteg.
+- A felület a legkönnyebb XSS-cél: modellkimenetet és dokumentumszöveget mutat. Ezt nem a
+  szűrés oldja meg, hanem hogy semmi nem megy át HTML-értelmezőn. A CSP csak második vonal.
+- A konténer előkészítése akkor biztonságos, ha minden lépése idempotens (`seed --if-empty`,
+  hash-alapú ingest, `bootstrap`). Így ugyanaz a parancs fut az első és a századik indításkor,
+  helyben és PaaS-on.
+- Egy helyen legyenek a jelszavak: a Compose a `.env` URL-jeit használja, és csak a hosztot
+  cseréli. Egy második jelszókészlet a konténerhez előbb-utóbb eltérne az elsőtől.
 
 ---
 

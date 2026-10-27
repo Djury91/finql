@@ -38,3 +38,35 @@ jobs:
       # Az integrációs tesztek testcontainersszel indítanak Postgrest (pgvector/pgvector:pg18).
       - name: Tesztek
         run: uv run pytest
+
+  # A „kipróbálás egy paranccsal” útja: image-build, `docker compose up` a .env.example-lel
+  # (kulcs nélküli mód, tiny skála), majd egy streamelt agent-válasz a felület API-ján.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: docker compose up
+        run: |
+          cp .env.example .env
+          echo "FINQL_SEED_SCALE=tiny" >> .env
+          docker compose up -d --wait --build
+
+      - name: Füstpróba
+        run: |
+          curl -sf 127.0.0.1:8000/ready
+          curl -sfI 127.0.0.1:8000/ | grep -i "content-security-policy"
+          TOKEN=$(curl -sf -X POST 127.0.0.1:8000/auth/token \
+            -d username=pecs@minta-bank.example -d password=change-me-demo | jq -r .access_token)
+          ID=$(curl -sf -X POST 127.0.0.1:8000/chat/conversations \
+            -H "Authorization: Bearer $TOKEN" | jq -r .id)
+          curl -sfN -X POST "127.0.0.1:8000/chat/conversations/$ID/messages" \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            -d '{"content": "Hány 90+ napos késedelmes hitelünk van, és mi a teendő a szabályzat szerint?"}' \
+            | tee sse.txt
+          grep -q "event: done" sse.txt
+
+      - name: Naplók
+        if: failure()
+        run: docker compose logs

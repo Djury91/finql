@@ -200,6 +200,8 @@ Szabályok:
 | `GET` | `/api/v1/audit/queries` | Lekérdezésnapló (auditor) | 3 |
 | `GET` | `/api/v1/audit/conversations` | Az agent-beszélgetések (auditor) | 6 |
 | `GET` | `/health`, `/ready` | Élő- és készenléti ellenőrzés | 0 |
+| `GET` | `/` | Webes felület (statikus oldal, a `/static/` alól a szkript és a stílus) | 7 |
+| `GET` | `/web/config` | A felület beállításai bejelentkezés előtt: demó mód, demófelhasználók, példakérdések | 7 |
 
 ## 6. Nem-funkcionális követelmények
 
@@ -210,3 +212,26 @@ Szabályok:
 | Megfigyelhetőség | Strukturált JSON-log `request_id`-val. LLM-hívásonként modell, token és késleltetés naplózva. |
 | Költség | Felhasználónkénti napi tokenkeret. Haiku a könnyű feladatokra. |
 | Tesztelhetőség | Mock LLM, valódi Postgres (testcontainers), determinisztikus seed |
+
+## 7. Webes felület és telepítés (7. fázis)
+
+```mermaid
+flowchart LR
+    B[Böngésző] -->|GET /| PAGE[index.html<br/>CSP: script-src 'self']
+    B -->|POST /auth/token| API[FastAPI]
+    B -->|fetch + SSE<br/>POST /chat/.../messages| API
+    API --> PG[(PostgreSQL)]
+    SETUP[setup<br/>bootstrap · migrációk · seed<br/>demófelhasználók · ingest] --> PG
+    SETUP -. sikeres .-> API
+```
+
+- **Felület** (`web/static/`): egy oldal, egy szkript, egy stíluslap, build lépés nélkül.
+  Bejelentkezés, beszélgetések listája, a válasz streamelve. Minden eszközhívás egy
+  lenyitható kártya: a kérdés, a futtatott SQL, az eredménytábla, a talált források. A végén
+  az ellenőrzött válasz, `[n]` hivatkozásokkal az idézett forrásokra (ADR-010).
+- **A stream olvasása:** `fetch` és egy kis SSE-olvasó, mert az `EventSource` csak `GET`-et
+  küld, `Authorization` fejlécet nem. A „Leállítás” gomb megszakítja a kérést; a szerver a
+  kapcsolat bontásakor leállítja a fordulót.
+- **Telepítés:** egy image két paranccsal (`serve`, `setup`). Az alkalmazás csak a sikeres
+  `setup` után indul: Compose-ban függőségként, PaaS-on pre-deploy lépésként (ADR-011,
+  [08 – Telepítés](08-telepites.md)).

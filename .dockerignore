@@ -1,0 +1,20 @@
+# Csak ami a képhez kell: a titkok, a privát jegyzetek és a helyi gyorsítótárak kimaradnak.
+.env
+.env.*
+!.env.example
+private/
+.git/
+.github/
+.claude/
+.venv/
+**/__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+tests/
+eval/reports/
+docs/
+scripts/
+data/cache/
+*.dump
+*.sql.gz

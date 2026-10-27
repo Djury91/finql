@@ -1,5 +1,22 @@
 name: finql
 
+# `docker compose up`: adatbázis → előkészítés (setup) → alkalmazás, http://127.0.0.1:8000.
+# A fejlesztéshez elég az adatbázis: `docker compose up -d --wait db` (poe db-up), az alkalmazás
+# pedig a gépen fut (poe dev).
+
+x-finql: &finql
+  build: .
+  image: finql:local
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    # A .env URL-jei a gépről (127.0.0.1) érik el az adatbázist; a konténerben ez a hoszt a
+    # Compose-hálózat `db` neve (docker/entrypoint.sh). A jelszavak így egy helyen maradnak.
+    FINQL_DB_HOST: db:5432
+    # Konténerben JSON-log (a .env FINQL_ENV=dev értéke mellett is), felülírható a .env-ben.
+    FINQL_LOG_JSON: ${FINQL_LOG_JSON:-true}
+
 services:
   db:
     image: pgvector/pgvector:pg18
@@ -20,6 +37,25 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  # Egyszer fut le indításkor: szerepkörök, migrációk, adatok (ha még nincsenek), demófelhasználók,
+  # dokumentumok. Minden lépése idempotens.
+  setup:
+    <<: *finql
+    command: setup
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    <<: *finql
+    command: serve
+    ports:
+      - "127.0.0.1:${FINQL_PORT:-8000}:8000"
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   pgdata:

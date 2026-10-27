@@ -21,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
+from finql.audit.models import HashChained
 from finql.auth.models import UserRole
 from finql.core.base_model import Base
 from finql.llm.embeddings import EMBEDDING_DIMENSIONS
@@ -128,14 +129,16 @@ class AnswerStatus(enum.StrEnum):
     LLM_ERROR = "llm_error"
 
 
-class AnswerLog(Base):
-    """Every document answer: what was retrieved, what was cited, what it cost. Append-only like
-    the query log (db/app/020_answer_log.sql), and counted in the daily token budget."""
+class AnswerLog(HashChained, Base):
+    """Every document answer: what was retrieved, what was cited, what it cost. Append-only and
+    hash-chained like the query log (db/app/020_answer_log.sql), and counted in the daily token
+    budget."""
 
     __tablename__ = "answer_log"
     __table_args__ = (
         Index(None, "user_id", "created_at"),
         Index(None, "created_at"),
+        Index(None, "chain_seq", unique=True),
         {"comment": "Dokumentum-válaszok naplója: források, idézetek, tokenek. Csak hozzáfűzhető."},
     )
 

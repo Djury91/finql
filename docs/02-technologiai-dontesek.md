@@ -340,6 +340,29 @@ kell mutatnia.
   `hashing` embedding). A `cp .env.example .env && docker compose up` így API-kulcs nélkül
   is teljes, kattintható demót ad; a valódi modellhez két sort kell átírni.
 
+### ADR-012: Hash-láncolt napló, az adatbázisban számolva
+
+- **Mit véd:** az append-only jog az alkalmazást tartja vissza; a nagyobb jogú (tulajdonos,
+  DBA) módosítást nem. A `query_log` és az `answer_log` sorai ezért hash-láncot alkotnak: a
+  módosított, törölt vagy beszúrt sor a lánc ellenőrzésekor kiderül, a pontos sorszámmal.
+- **Az adatbázis számol, triggerben:** így egy hibás, megkerült vagy feltört alkalmazás sem
+  írhat rossz láncot, és a lánc a kódváltozásoktól független. Advisory lock állítja sorba az
+  írókat (a napló úgyis saját, rövid tranzakcióban íródik), a `chain_seq` egyedi indexe pedig
+  biztosítja, hogy a lánc ne ágazhasson el csendben.
+- **A hash a sor teljes JSON-alakjára számol, a `NULL` értékek nélkül.** A beállításfüggő
+  szöveggé alakítást (időzóna, float, bytea) a függvények rögzítik. Egy új oszlop így magától a
+  hash része lesz, nem kell kézi oszloplistát karbantartani. Egy új, `NULL`-os oszlop a régi
+  sorok hash-ét nem változtatja meg; egy oszlop törlése, átnevezése vagy típusváltása viszont
+  igen, ezért az ilyen migrációnak a láncot is újra kell fűznie (ami maga is egy dokumentált,
+  naplózott esemény).
+- **Horgony a lánc ellen, amit egészében újraírtak:** a lánc fejét az adatbázison kívül is
+  rögzítjük (`finql audit verify --anchor`). Ez olcsó, és nem kell hozzá külső szolgáltatás.
+- **Elvetve:** a pgaudit (a műveleteket naplózza, nem a sorok épségét bizonyítja, és superuser
+  kell a beállításához); a WORM-tárba vagy külső naplószolgáltatásba másolás (új függőség egy
+  portfólióprojektben); HMAC titkos kulccsal (a kulcsot az adatbázisnak vagy az alkalmazásnak
+  ismernie kellene, így a nagyobb jogú támadó is ismerné). Ha a fenyegetés ezt kívánja, a
+  horgony helyére egy aláírt, külső tár léphet; a lánc változatlan marad.
+
 ### ADR-005: Fejlesztői eszközök
 
 | Terület | Választás | Miért |
@@ -373,5 +396,6 @@ kell mutatnia.
 | 009 | Agent: saját eszközhívási ciklus korlátokkal, kérdés–válasz memória összefoglalóval, SSE | Elfogadva |
 | 010 | Webes felület: statikus oldal és szkript build nélkül, csak szövegcsomópontok, szigorú CSP | Elfogadva |
 | 011 | Kétlépcsős, nem root image; idempotens `setup`; Railway a saját pgvector-image-dzsel | Elfogadva |
+| 012 | Hash-láncolt `query_log` és `answer_log`: trigger az adatbázisban, külső horgony | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

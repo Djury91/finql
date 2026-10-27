@@ -9,7 +9,7 @@ from finql.agent.models import Conversation
 from finql.agent.schemas import ConversationOut
 from finql.audit import service
 from finql.audit.models import QueryStatus
-from finql.audit.schemas import QueryLogOut
+from finql.audit.schemas import ChainStatusOut, QueryLogOut
 from finql.auth.dependencies import require_role
 from finql.auth.models import User, UserRole
 from finql.core.deps import DbSession
@@ -50,3 +50,17 @@ async def conversations(
         query = query.where(Conversation.user_id == user_id)
     rows = await session.scalars(query.limit(limit).offset(offset))
     return [ConversationOut.model_validate(row) for row in rows]
+
+
+@router.get("/chain", responses={**UNAUTHORIZED, **FORBIDDEN})
+async def chain(
+    session: DbSession,
+    _: Annotated[User, Depends(require_role(UserRole.AUDITOR, UserRole.ADMIN))],
+) -> list[ChainStatusOut]:
+    """A hash-láncolt naplók ellenőrzése (auditor és admin): a lánc ép-e, és ha nem, hol szakad
+    meg (gap: törölt sor, link: beszúrt vagy cserélt sor, content: módosított sor). A lánc fejét
+    (head_seq, head_hash) érdemes máshol is rögzíteni: így a teljes újraírás is kimutatható
+    (`finql audit verify --anchor`)."""
+    return [
+        ChainStatusOut.model_validate(status) for status in await service.verify_chains(session)
+    ]

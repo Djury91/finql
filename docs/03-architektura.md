@@ -199,6 +199,7 @@ Szabályok:
 | `POST` | `/api/v1/chat/conversations/{id}/messages` | Üzenet az agentnek (SSE stream) | 6 |
 | `GET` | `/api/v1/audit/queries` | Lekérdezésnapló (auditor) | 3 |
 | `GET` | `/api/v1/audit/conversations` | Az agent-beszélgetések (auditor) | 6 |
+| `GET` | `/api/v1/audit/chain` | A hash-láncolt naplók ellenőrzése: ép-e, hol szakad meg, a lánc feje (auditor) | 8 |
 | `GET` | `/health`, `/ready` | Élő- és készenléti ellenőrzés | 0 |
 | `GET` | `/` | Webes felület (statikus oldal, a `/static/` alól a szkript és a stílus) | 7 |
 | `GET` | `/web/config` | A felület beállításai bejelentkezés előtt: demó mód, demófelhasználók, példakérdések | 7 |

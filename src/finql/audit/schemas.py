@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -30,3 +31,15 @@ class QueryLogOut(BaseModel):
     request_id: str | None
     conversation_id: uuid.UUID | None
     created_at: datetime
+
+
+class ChainStatusOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    log: str
+    intact: bool
+    checked: int
+    broken_at: int | None
+    problem: Literal["gap", "link", "content"] | None
+    head_seq: int | None
+    head_hash: str | None

@@ -4,7 +4,7 @@ citations, checked before it is shown, and an entry in the answer log (docs/03-a
 
 import html
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -74,10 +74,16 @@ def system_prompt() -> str:
 
 
 def user_prompt(question: str, sources: Sequence[SearchHit]) -> str:
+    numbered = render_sources(enumerate(sources, start=1))
+    return f"{numbered}\n\nKérdés: {question.strip()}"
+
+
+def render_sources(numbered: Iterable[tuple[int, SearchHit]]) -> str:
     """The sources in tags, so the model can tell where a source's text ends. A closing tag in a
-    document's own text is broken up: a document cannot close its tag and write outside it."""
+    document's own text is broken up: a document cannot close its tag and write outside it.
+    The agent's search_documents tool returns its hits the same way."""
     blocks = []
-    for number, hit in enumerate(sources, start=1):
+    for number, hit in numbered:
         attributes = " ".join(
             f'{name}="{html.escape(value, quote=True)}"'
             for name, value in (
@@ -89,7 +95,7 @@ def user_prompt(question: str, sources: Sequence[SearchHit]) -> str:
         )
         content = hit.content.replace("</source", "</ source")
         blocks.append(f"<source {attributes}>\n{content}\n</source>")
-    return "<sources>\n" + "\n\n".join(blocks) + f"\n</sources>\n\nKérdés: {question.strip()}"
+    return "<sources>\n" + "\n\n".join(blocks) + "\n</sources>"
 
 
 def cited_numbers(output: GeneratedAnswer, source_count: int) -> list[int]:
@@ -101,6 +107,15 @@ def cited_numbers(output: GeneratedAnswer, source_count: int) -> list[int]:
 
 def remove_invalid_markers(answer: str, source_count: int) -> str:
     return _MARKER.sub(lambda m: m[0] if 1 <= int(m[1]) <= source_count else "", answer)
+
+
+def marker_numbers(answer: str) -> list[int]:
+    """The [n] markers of a text, in order of first appearance."""
+    return list(dict.fromkeys(int(n) for n in _MARKER.findall(answer)))
+
+
+def remove_markers(answer: str) -> str:
+    return _MARKER.sub("", answer)
 
 
 async def answer_question(

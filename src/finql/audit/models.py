@@ -88,4 +88,7 @@ class QueryLog(Base):
     output_tokens: Mapped[int] = mapped_column(server_default=text("0"))
     llm_latency_ms: Mapped[int | None]
     request_id: Mapped[str | None] = mapped_column(Text)
+    # Set when the agent asked (the query_database tool): the conversation it belongs to. No
+    # foreign key, like example_ids: the log does not depend on other tables.
+    conversation_id: Mapped[uuid.UUID | None]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

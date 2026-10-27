@@ -12,7 +12,7 @@ import asyncio
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from finql.audit.models import QueryStatus
 from finql.core.errors import AppError
@@ -58,7 +58,7 @@ class _Attempt:
     fields: dict[str, Any]
 
 
-class _Recorder:
+class AttemptRecorder:
     """The eval's AttemptLog: keeps the attempts instead of writing query_log rows."""
 
     def __init__(self) -> None:
@@ -92,7 +92,17 @@ class _Recorder:
         return sum(u.input_tokens for u in usages), sum(u.output_tokens for u in usages)
 
 
-async def resolve_scopes(pipeline: Pipeline, questions: Sequence[Question]) -> dict[str, DataScope]:
+class Scoped(Protocol):
+    """A question with an asker: a branch manager's comes with a branch code."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def branch(self) -> str | None: ...
+
+
+async def resolve_scopes(pipeline: Pipeline, questions: Sequence[Scoped]) -> dict[str, DataScope]:
     """The data scope of each question, by id: a branch manager's comes from the branch code."""
     codes = {q.branch for q in questions if q.branch is not None}
     branch_ids: dict[str, int] = {}
@@ -177,7 +187,7 @@ async def run_eval(
 async def run_question(
     pipeline: Pipeline, q: Question, scope: DataScope, expected: ResultSet | None
 ) -> Outcome:
-    recorder = _Recorder()
+    recorder = AttemptRecorder()
     started = time.perf_counter()
     examples = await select_examples(pipeline, q.question)
     answer: Answer | None = None

@@ -390,6 +390,60 @@ def eval_retrieval(
         raise typer.Exit(1)
 
 
+@eval_app.command("agent")
+def eval_agent(
+    llm: Annotated[
+        str,
+        typer.Option(
+            help="anthropic: a valódi modell (API-kulcs kell); demo: kulcs nélküli próba."
+        ),
+    ] = "anthropic",
+    only: Annotated[list[str] | None, typer.Option(help="Csak ezek a kérdések (id).")] = None,
+    save: Annotated[bool, typer.Option(help="Riport az eval/reports mappába.")] = True,
+) -> None:
+    """Az agent mérése vegyes kérdésekkel (eval/datasets/agent.yaml): a szükséges eszközök, az
+    idézett dokumentum, a helyes szám a válaszban. Előtte: finql ingest."""
+    from datetime import datetime
+
+    from finql.eval.agent import AgentOutcome, run_agent
+    from finql.eval.run import REPORTS_DIR
+    from finql.eval.runner import DatasetError
+
+    if llm not in ("anthropic", "demo"):
+        raise typer.BadParameter(f"ismeretlen LLM: {llm}")
+
+    def progress(o: AgentOutcome) -> None:
+        mark = "ok  " if o.passed else "HIBA"
+        failed = f" ({', '.join(o.failed)})" if o.failed else ""
+        typer.echo(f"  {mark} {o.question.id:<34} {', '.join(o.tools_called)}{failed}")
+
+    try:
+        result = asyncio.run(
+            run_agent(
+                get_settings(),
+                llm=llm,  # type: ignore[arg-type]  # checked above
+                only=frozenset(only or ()),
+                on_outcome=progress,
+            )
+        )
+    except DatasetError as exc:
+        typer.echo(f"Hiba: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    metrics = result.metrics
+    typer.echo(
+        f"Átment: {metrics.passed}/{metrics.questions}, "
+        f"eszközhívás/kérdés: {metrics.avg_tool_calls:.1f}, "
+        f"biztonsági hiba: {metrics.safety_failures}"
+    )
+    if save:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = REPORTS_DIR / f"agent-{datetime.now():%Y%m%d-%H%M}.md"
+        path.write_text(result.report, encoding="utf-8", newline="\n")
+        typer.echo(f"Riport: {path}")
+    if metrics.safety_failures:
+        raise typer.Exit(1)
+
+
 async def _retrieval_outcomes(top_k: int) -> "tuple[list[RetrievalOutcome], str | None]":
     from finql.core.db import create_engine, create_sessionmaker
     from finql.eval.retrieval import load_retrieval, run_retrieval_eval

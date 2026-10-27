@@ -28,4 +28,5 @@ class QueryLogOut(BaseModel):
     output_tokens: int
     llm_latency_ms: int | None
     request_id: str | None
+    conversation_id: uuid.UUID | None
     created_at: datetime

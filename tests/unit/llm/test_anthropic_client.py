@@ -2,7 +2,7 @@
 failures. No network, no API key."""
 
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,7 @@ import pytest
 from pydantic import BaseModel
 
 from finql.llm.anthropic_client import MISSING_CREDENTIALS, REFUSAL_FALLBACK_BETA, AnthropicClient
+from finql.llm.chat import TextDelta, ToolCall, ToolSpec, TurnResult
 from finql.llm.client import LLMError, LLMRefusalError
 from tests.helpers import make_settings
 
@@ -167,3 +168,126 @@ async def test_missing_credentials_are_a_clear_503(
         await client.generate_structured(system="s", prompt="p", output_type=Answer)
 
     assert failed.value.message == MISSING_CREDENTIALS
+
+
+# --- the agent's streamed turns ----------------------------------------------------------------
+
+
+def sse(*events: dict[str, Any]) -> httpx.Response:
+    body = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events)
+    return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+
+TOOL_TURN = sse(
+    {
+        "type": "message_start",
+        "message": {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-sonnet-5-5",
+            "content": [],
+            "stop_reason": None,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 10, "output_tokens": 1},
+        },
+    },
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Megné"}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "zem."}},
+    {"type": "content_block_stop", "index": 0},
+    {
+        "type": "content_block_start",
+        "index": 1,
+        "content_block": {
+            "type": "tool_use",
+            "id": "toolu_1",
+            "name": "query_database",
+            "input": {},
+        },
+    },
+    {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {"type": "input_json_delta", "partial_json": '{"question": "Hány hitel?"}'},
+    },
+    {"type": "content_block_stop", "index": 1},
+    {
+        "type": "message_delta",
+        "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+        "usage": {"output_tokens": 20, "cache_read_input_tokens": 4000},
+    },
+    {"type": "message_stop"},
+)
+
+QUERY_TOOL = ToolSpec(
+    "query_database",
+    "Adatok.",
+    {
+        "type": "object",
+        "properties": {"question": {"type": "string", "minLength": 3, "description": "Kérdés."}},
+        "required": ["question"],
+        "additionalProperties": False,
+    },
+)
+
+
+async def collect(stream: AsyncIterator[TextDelta | TurnResult]) -> list[TextDelta | TurnResult]:
+    return [item async for item in stream]
+
+
+async def test_stream_turn_streams_text_then_the_whole_turn() -> None:
+    client, sent = client_with(lambda _: TOOL_TURN)
+    history = [{"role": "user", "content": "Hány hitel késik?"}]
+
+    items = await collect(
+        client.stream_turn(system="SZABÁLYOK", messages=history, tools=[QUERY_TOOL])
+    )
+
+    *deltas, turn = items
+    assert deltas == [TextDelta("Megné"), TextDelta("zem.")]
+    assert isinstance(turn, TurnResult)
+    assert turn.stop_reason == "tool_use"
+    assert turn.text == "Megnézem."
+    assert turn.tool_calls == [ToolCall("toolu_1", "query_database", {"question": "Hány hitel?"})]
+    assert turn.content[1] == {
+        "type": "tool_use",
+        "id": "toolu_1",
+        "name": "query_database",
+        "input": {"question": "Hány hitel?"},
+    }
+    assert (turn.usage.input_tokens, turn.usage.output_tokens) == (4010, 20)
+
+    body = json.loads(sent[0].content)
+    assert body["stream"] is True
+    assert body["messages"] == history
+    assert body["tool_choice"] == {"type": "auto"}
+    assert body["cache_control"] == {"type": "ephemeral"}  # the growing conversation
+    assert body["system"][0]["cache_control"] == {"type": "ephemeral"}  # rules and tools
+    (tool,) = body["tools"]
+    assert tool["strict"] is True
+    question = tool["input_schema"]["properties"]["question"]
+    # Not supported by strict mode: moved into the description, the tool checks it itself.
+    assert "minLength" not in question and "minLength: 3" in question["description"]
+    assert "eager_input_streaming" not in tool
+    assert "fallbacks" not in body  # no model switch mid-conversation
+
+
+async def test_stream_turn_without_tools_allowed() -> None:
+    client, sent = client_with(lambda _: TOOL_TURN)
+
+    await collect(
+        client.stream_turn(system="s", messages=[], tools=[QUERY_TOOL], allow_tools=False)
+    )
+
+    body = json.loads(sent[0].content)
+    assert body["tool_choice"] == {"type": "none"}
+    assert len(body["tools"]) == 1  # still sent: the history refers to them
+
+
+async def test_stream_turn_provider_error_is_llm_error() -> None:
+    error = {"type": "error", "error": {"type": "overloaded_error", "message": "boom"}}
+    client, _ = client_with(lambda _: httpx.Response(529, json=error))
+
+    with pytest.raises(LLMError):
+        await collect(client.stream_turn(system="s", messages=[], tools=[]))

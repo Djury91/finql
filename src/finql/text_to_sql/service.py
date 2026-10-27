@@ -1,6 +1,7 @@
 """The text-to-SQL pipeline: budget → LLM → validator → cost guard → read-only execution, with
 self-repair and an audit log entry for every attempt (docs/03-architektura.md, 2.)."""
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
@@ -72,6 +73,14 @@ def data_scope(user: User) -> DataScope:
     raise PermissionDeniedError("Ehhez a szerepkörhöz nem tartozik banki adat.")
 
 
+def has_data_access(user: User) -> bool:
+    try:
+        data_scope(user)
+    except PermissionDeniedError:
+        return False
+    return True
+
+
 async def answer_question(
     pipeline: Pipeline,
     session: AsyncSession,
@@ -79,12 +88,16 @@ async def answer_question(
     question: str,
     *,
     request_id: str | None = None,
+    conversation_id: uuid.UUID | None = None,
 ) -> Answer:
+    """`conversation_id`: the agent asked (the query_database tool); it goes into the log."""
     scope = data_scope(user)
     try:
         await check_budget(session, user.id, user.daily_token_budget)
     except TokenBudgetExceededError as exc:
-        log = _AttemptLog(pipeline.log_sessionmaker, user, scope, question, request_id)
+        log = _AttemptLog(
+            pipeline.log_sessionmaker, user, scope, question, request_id, conversation_id
+        )
         await log.write(1, QueryStatus.REJECTED_BUDGET, rejection_reason=exc.message)
         raise
 
@@ -95,6 +108,7 @@ async def answer_question(
         scope,
         question,
         request_id,
+        conversation_id,
         example_ids=[example.id for example in examples] or None,
     )
     return await run_attempts(pipeline, question, scope, examples, log)
@@ -272,6 +286,7 @@ class _AttemptLog:
     scope: DataScope
     question: str
     request_id: str | None
+    conversation_id: uuid.UUID | None = None
     example_ids: list[int] | None = None
 
     async def write(
@@ -291,6 +306,7 @@ class _AttemptLog:
             status=status,
             prompt_version=PROMPT_VERSION,
             request_id=self.request_id,
+            conversation_id=self.conversation_id,
             example_ids=self.example_ids,
             **fields,
         )

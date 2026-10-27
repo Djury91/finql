@@ -59,7 +59,7 @@ sequenceDiagram
     participant DB as Postgres (llm_reader)
     participant LOG as query_log
 
-    U->>API: POST /api/v1/query {question}
+    U->>API: POST /query {question}
     API->>API: JWT → user (szerepkör, fiók)
     API->>CTX: releváns nézetek + oszlopleírások + few-shot példák
     CTX-->>API: kontextus (COMMENT ON + app.sql_examples, vektoros keresés)
@@ -182,24 +182,25 @@ Szabályok:
 - **SSE-események:** `turn_start`, `text`, `tool_start`, `tool_result`, `done`, `error`. Ami a
   stream előtt eldől (404, 409, 429), az rendes JSON-hiba.
 
-## 5. API-felület (tervezett)
+## 5. API-felület
 
 | Metódus | Útvonal | Leírás | Fázis |
 |---|---|---|---|
-| `POST` | `/api/v1/auth/token` | Bejelentkezés → JWT | 2 |
-| `GET` | `/api/v1/auth/me` | Aktuális felhasználó | 2 |
-| `POST` | `/api/v1/query` | Egyszeri text-to-SQL kérdés | 3 |
-| `GET` | `/api/v1/query/history` | Saját korábbi lekérdezések | 3 |
-| `GET` | `/api/v1/schema` | Az LLM által látott séma (átláthatóság) | 3 |
-| `POST` | `/api/v1/documents/search` | Dokumentumkeresés | 5 |
-| `POST` | `/api/v1/documents/answer` | Válasz a dokumentumokból, forrásmegjelöléssel | 5 |
-| `POST` | `/api/v1/chat/conversations` | Új beszélgetés | 6 |
-| `GET` | `/api/v1/chat/conversations` | Saját beszélgetések | 6 |
-| `GET` | `/api/v1/chat/conversations/{id}` | Egy beszélgetés minden lépése (saját; auditor, admin: bárkié) | 6 |
-| `POST` | `/api/v1/chat/conversations/{id}/messages` | Üzenet az agentnek (SSE stream) | 6 |
-| `GET` | `/api/v1/audit/queries` | Lekérdezésnapló (auditor) | 3 |
-| `GET` | `/api/v1/audit/conversations` | Az agent-beszélgetések (auditor) | 6 |
-| `GET` | `/api/v1/audit/chain` | A hash-láncolt naplók ellenőrzése: ép-e, hol szakad meg, a lánc feje (auditor) | 8 |
+| `POST` | `/auth/token` | Bejelentkezés → JWT | 2 |
+| `GET` | `/auth/me` | Aktuális felhasználó | 2 |
+| `GET` | `/auth/users` | Felhasználók listája (admin) | 2 |
+| `POST` | `/query` | Egyszeri text-to-SQL kérdés | 3 |
+| `GET` | `/query/history` | Saját korábbi lekérdezések | 3 |
+| `GET` | `/schema` | Az LLM által látott séma (átláthatóság) | 3 |
+| `POST` | `/documents/search` | Dokumentumkeresés | 5 |
+| `POST` | `/documents/answer` | Válasz a dokumentumokból, forrásmegjelöléssel | 5 |
+| `POST` | `/chat/conversations` | Új beszélgetés | 6 |
+| `GET` | `/chat/conversations` | Saját beszélgetések | 6 |
+| `GET` | `/chat/conversations/{id}` | Egy beszélgetés minden lépése (saját; auditor, admin: bárkié) | 6 |
+| `POST` | `/chat/conversations/{id}/messages` | Üzenet az agentnek (SSE stream) | 6 |
+| `GET` | `/audit/queries` | Lekérdezésnapló (auditor) | 3 |
+| `GET` | `/audit/conversations` | Az agent-beszélgetések (auditor) | 6 |
+| `GET` | `/audit/chain` | A hash-láncolt naplók ellenőrzése: ép-e, hol szakad meg, a lánc feje (auditor) | 8 |
 | `GET` | `/health`, `/ready` | Élő- és készenléti ellenőrzés | 0 |
 | `GET` | `/` | Webes felület (statikus oldal, a `/static/` alól a szkript és a stílus) | 7 |
 | `GET` | `/web/config` | A felület beállításai bejelentkezés előtt: demó mód, demófelhasználók, példakérdések | 7 |

@@ -85,6 +85,9 @@ FINQL_LLM_PROVIDER=fake
 FINQL_EMBEDDING_PROVIDER=hashing
 ```
 
+   Nyomkövetés (opcionális, ADR-014): `FINQL_OTEL_ENDPOINT` egy OTLP/HTTP-gyűjtő címe (pl. egy
+   menedzselt OpenTelemetry-szolgáltatás). Üresen ki van kapcsolva.
+
 4. **Domain:** az `app` → *Settings* → *Networking* → *Generate Domain*. A `PORT` változót a
    Railway adja, az entrypoint azon indítja az uvicornt.
 5. **Ellenőrzés:** `https://<domain>/ready` → `{"status":"ready","database":"ok"}`, és a

@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** a 0–7. fázis kész, a valódi modellel mért eredményekkel; a 8. (haladó) fázisból kész a hash-láncolt napló, az MCP-szerver és az OpenTelemetry-nyomkövetés. A nyilvános telepítés még hátravan. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** kész. A 0–8. fázis a valódi modellel mért eredményekkel; a 8. (haladó) fázisból a hash-láncolt napló, az MCP-szerver és az OpenTelemetry-nyomkövetés. Nyitva csak a nyilvános telepítés (Railway-fiók kell). Lásd: [ütemterv](docs/07-utemterv.md)
 
 ![Demó: a pécsi fiókvezető kérdez, a válasz streamelve jön, az SQL-lel, az eredménnyel és az idézett szabályzattal](docs/img/demo.gif)
 
@@ -315,6 +315,13 @@ eredménye az első mérésből való.
   semmi nem megy át HTML-értelmezőn; a CSP csak a második vonal.
 - **Az előkészítés legyen idempotens.** Ugyanaz a `setup` fut az első és a századik
   indításkor, helyben és PaaS-on.
+- **A napló hitelessége a láncon kívül dől el.** A hash-lánc a módosítást kimutatja, de az
+  egészében újraírt láncot csak egy máshol őrzött fej (horgony) leplezi le.
+- **Egy idegen modell se kapjon több jogot, mint a saját.** Az MCP-szerver ugyanazt az
+  eszközréteget adja Claude Desktopnak, mint az agentnek: kérdést, nem SQL-t.
+- **A mérés hibát talál, a zöld teszt nem mindig.** A valódi nyom mutatta meg, hogy az
+  SQL-spanok hiányoznak (a mérőcsomag a SQLAlchemy 2.1-et csendben kihagyta), és hogy a
+  válaszidő szinte csak modellidő: a 11,6 s-ból ~10 s, az SQL 82 ms.
 
 ## Licenc
 

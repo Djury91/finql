@@ -60,7 +60,7 @@ Egy belső vállalati eszköz reális méretére tervezünk, nem egy internetes 
 
 - Banki mintaadatbázis (DB-first), szintetikus magyar adatokkal (Faker `hu_HU`).
 - Felhasználók, szerepkörök, JWT-alapú bejelentkezés.
-- `POST /api/v1/query`: kérdés → SQL → eredménytábla + magyarázat.
+- `POST /query`: kérdés → SQL → eredménytábla + magyarázat.
 - Négyrétegű SQL-védelem: validátor, költségőr, read-only szerepkör, RLS.
 - Lekérdezésnapló (audit).
 - Eval harness arany- és rosszindulatú kérdéssorral.

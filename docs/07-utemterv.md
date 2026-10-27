@@ -278,9 +278,21 @@ nyilvános telepítéshez Railway-fiók kell; a konfiguráció és a lépések k
 - [x] OpenTelemetry-trace (FastAPI → LLM → DB), vagy Langfuse az LLM-hívásokhoz (OpenTelemetry, helyben Jaegerrel; ADR-014)
 - [x] Hash-láncolt `query_log` (`prev_hash`, `row_hash`): a naplóból törölt vagy módosított sor kimutatható (az `answer_log` is; ADR-012)
 - [x] MCP-szerver: a `query_database` és a `search_documents` eszköz MCP-n keresztül, így Claude Desktopból is használható (`finql mcp`, ADR-013)
-- [ ] Szemantikus válasz-cache (hasonló kérdés + ugyanaz a szerepkör → cache-elt SQL)
-- [ ] Materializált nézetek frissítése ütemezve, adatfrissességi metaadat a válaszban
-- [ ] Django + Django Ninja változat egy moduljáról, összehasonlító jegyzettel
+- [ ] ~~Szemantikus válasz-cache~~ – tudatosan kihagyva (lásd lent)
+- [ ] ~~Materializált nézetek ütemezett frissítése~~ – tudatosan kihagyva (lásd lent)
+- [ ] ~~Django + Django Ninja változat~~ – tudatosan kihagyva (lásd lent)
+
+**Tudatosan kihagyva, indoklással:**
+- **Szemantikus válasz-cache:** egy „hasonló” kérdés cache-elt SQL-je pont a különbséget
+  tévesztheti el (más időszak, más fiók, „legalább” vs „több mint”), és rossz számot ad,
+  magabiztosan. Ezen a kérdésszámon a megtakarítás nem mérhető, a kockázat igen. Ha a
+  forgalom indokolja, előbb a pontos (normalizált kérdés + szerepkör + adatkör) egyezéssel
+  érdemes kezdeni, mérve.
+- **Materializált nézetek ütemezett frissítése:** a szintetikus adat nem változik, a havi
+  összesítőt a `seed` frissíti. Éles adatnál ez kell: `REFRESH MATERIALIZED VIEW
+  CONCURRENTLY` ütemezve, és a válaszban az adat frissessége (`analytics.business_day`).
+- **Django-változat:** egy második keretrendszer ugyanarra a feladatra sok munka kevés
+  újdonságért; a döntés indoklása az ADR-001-ben van.
 
 **Állapot – hash-láncolt napló:** a `query_log` és az `answer_log` sorait egy trigger fűzi
 láncba (`chain_seq`, `prev_hash`, `row_hash`); a migráció a meglévő sorokat is láncba fűzte.
@@ -338,3 +350,10 @@ modellhívás, a lekérdezés 82 ms. 9 teszt: 5 integrációs, 4 egység.
   és az indulási sor a protokoll csatornájára ment. Egy teszt most a teljes stdout-ot nézi.
 - A nyom megmutatta, hová megy az idő: a válaszidő szinte csak modellidő. Egy gyorsításnak
   ezért a modellhívások számánál és méreténél kell kezdődnie, nem az SQL-nél.
+
+## Lezárás
+
+A projekt a 8. fázis három választott pontjával lezárult (2026-10-27). Nyitva marad:
+- **Nyilvános telepítés:** Railway-fiók kell hozzá; a konfiguráció és a lépések készen
+  vannak ([08 – Telepítés](08-telepites.md)).
+- **Távoli MCP-szerver:** OAuth 2.1-es hitelesítéssel (ADR-013); az eszközréteg kész hozzá.

@@ -96,8 +96,9 @@ integrációs tesztek zöldek. Kézzel írt SQL-lel megválaszolható a [projekt
 és minden kísérlet megjelenik a `query_log` táblában.
 
 **Állapot:** a lánc ál-LLM-mel végig tesztelt (elutasítás, önjavítás, költségőr, időkorlát,
-tokenkeret, napló). A valódi Claude-dal futó ellenőrzés (`uv run poe test-llm`) API-kulcsra vár;
-a rendszeres mérés a 4. fázis evalja.
+tokenkeret, napló). A valódi Claude-dal (`uv run poe test-llm`, 2026-10-27) a példakérdések
+helyes választ adnak, a fiókvezetői kérdés a fiókban marad, és a három rosszindulatú kérdés nem
+hoz vissza adatot. A rendszeres mérés a 4. fázis evalja.
 
 **Tanulságok:**
 - Az EXPLAIN-költség az RLS miatt félrevezető (a hitelnézet: 16 millió költség, 0,3 s). A becsült
@@ -119,7 +120,7 @@ a rendszeres mérés a 4. fázis evalja.
 - [x] Metrikák: végrehajtási pontosság, érvényes SQL aránya, elutasítási arány, p50/p95 késleltetés, tokenek kérdésenként
 - [x] Eredmények az `eval_runs`/`eval_results` táblákba, markdown-riport, két futás összevetése (`finql eval compare`)
 - [x] `app.sql_examples` + embedding (Voyage, `voyage-4`): a 3 leghasonlóbb példa dinamikusan kerül a promptba (`finql examples sync`, 28 példa)
-- [ ] Összevetés: v1 prompt few-shot nélkül vs. dinamikus few-shottal → eredmény a README-be (API-kulcsra vár)
+- [x] Összevetés: v1 prompt few-shot nélkül vs. dinamikus few-shottal → eredmény a README-be
 - [x] `eval.yml` workflow (kézi indítás, API-kulcs secretből)
 
 **Kész, ha:** legalább 80% pontosság az arany soron, 100% elutasítás a rosszindulatú soron,
@@ -127,8 +128,9 @@ a rendszeres mérés a 4. fázis evalja.
 
 **Állapot:** a harness kész és tesztelt. Az orákulummal (az elvárt SQL-t visszaadó ál-LLM) a
 `small` skálán 50/50 és 20/20, vagyis a kérdéssorok, a hatókörök, az összevetés, a tárolás és a
-riport rendben van. A valódi mérés API-kulcsra vár: `FINQL_ANTHROPIC_API_KEY`, few-shothoz
-`FINQL_VOYAGE_API_KEY` is.
+riport rendben van. A valódi mérés (2026-10-27, Claude Sonnet 5.5, `voyage-4`): **48/50 (96%)**
+few-shot nélkül és 3 példával is, **20/20** elutasítás, 100% érvényes SQL, p50 3,0 s. A riportok:
+`eval/reports/published/`.
 
 **Tanulságok:**
 - A kérdéssor megírása két korábbi hibát hozott elő, még mielőtt egy modell válaszolt volna.
@@ -144,6 +146,13 @@ riport rendben van. A valódi mérés API-kulcsra vár: `FINQL_ANTHROPIC_API_KEY
   adott; a kérdés kategóriákra változott. A rangsorok határán nincs holtverseny (ellenőrizve).
 - A few-shot példák a felhasználói üzenetbe kerülnek: a rendszerprompt így bájtra ugyanaz
   marad, és cache-elhető (ADR-007).
+- A dinamikus few-shot a Sonnet 5.5-tel nem javított mérhetően (48/50 mindkét futásban, más-más
+  hibával), és ~7%-kal több tokenbe kerül. Egy erős modellnél a séma kommentjei és a szabályok
+  többet adnak, mint a példák; a few-shot ott segíthet, ahol a modell gyengébb, vagy a házi
+  szokás nem következik a sémából.
+- A valódi modell hibáinak fele a kérdéssor hibája volt: két kérdés kétértelmű („legjobban
+  nőtt”: abszolút vagy százalékos; „prémium és lakossági”: együtt vagy szegmensenként). A
+  hibás válaszokat ezért egyenként kell elolvasni, mielőtt a promptot javítjuk.
 
 ---
 
@@ -159,7 +168,7 @@ riport rendben van. A valódi mérés API-kulcsra vár: `FINQL_ANTHROPIC_API_KEY
 - [x] `retriever.py`: hibrid keresés RRF-fel, olvasási szint az SQL-ben (`min_role` helyett, ADR-008); embedding nélkül csak szöveges keresés
 - [x] `POST /documents/search` és `POST /documents/answer`: válasz idézetekkel (dokumentum + szakasz), hivatkozás nélküli választ nem ad; `answer_log` (append-only, a tokenkeretbe számít)
 - [x] Mini eval: 20 kérdés → az elvárt dokumentum a top 5-ben van? (`finql eval retrieval`: recall@5, MRR, szivárgás)
-- [ ] Élő próba Claude-dal és Voyage-dzsal: recall@5 a valódi embeddinggel, idézett válaszok (API-kulcsra vár)
+- [x] Élő próba Claude-dal és Voyage-dzsal: recall@5 a valódi embeddinggel, idézett válaszok
 
 **Kész, ha:** „Mennyi a késedelmi kamat?” jellegű kérdésekre helyes, idézett válasz jön,
 és a jogosultság nélküli dokumentum nem jelenik meg.
@@ -167,8 +176,11 @@ riport rendben van. A valódi mérés API-kulcsra vár: `FINQL_ANTHROPIC_API_KEY
 **Állapot:** a teljes út kész és tesztelt: betöltés, hibrid keresés, olvasási szint, idézett
 válasz, napló. A kulcs nélküli (hash-alapú) embeddinggel a keresési eval **recall@5 = 17/17**,
 MRR 0,75, és a három szivárgáspróbán egyetlen belső dokumentum sem jutott fiókvezetőhöz. A
-válasz útja ál-LLM-mel tesztelt (idézet-ellenőrzés, napló, tokenkeret). A Voyage-dzsal mért
-recall és a Claude-dal adott válaszok API-kulcsra várnak.
+válasz útja ál-LLM-mel tesztelt (idézet-ellenőrzés, napló, tokenkeret). A `voyage-4`-gyel
+recall@5 = 17/17, **MRR 0,94**, szivárgás 0. Claude-dal a „Mennyi a késedelmi kamat a személyi
+kölcsönnél?” kérdésre idézett, helyes válasz jön (ügyleti kamat + 3 százalékpont, 17,90%); a
+fiókvezető a belső árazási szabályzatot nem kapja meg, és a modell azt mondja, a források nem
+tartalmazzák a választ.
 
 **Tanulságok:**
 - A szerepkörök nem létra: az auditor nem lát banki adatot, mégis minden szabályzatot olvas. A
@@ -193,9 +205,9 @@ recall és a Claude-dal adott válaszok API-kulcsra várnak.
 - [x] Tool-use ciklus: max. 6 hívás, tokenkeret minden modellhívás előtt, határidő az egész üzenetre, hibakezelés eszközönként (ADR-009)
 - [x] Beszélgetés-memória: kérdések és végső válaszok; 8 forduló fölött összefoglaló (Haiku), a legutóbbi fele szó szerint
 - [x] SSE-stream: `turn_start`, `text`, `tool_start`, `tool_result`, `done`, `error`; egy beszélgetésben egyszerre egy válasz (advisory lock, 409)
-- [x] Indirekt prompt injection teszt: mérgezett dokumentum; egy azt követő modell sem kap több jogot (szkriptelt teszt), és a valódi modell nem követi (élő teszt, API-kulcsra vár)
+- [x] Indirekt prompt injection teszt: mérgezett dokumentum; egy azt követő modell sem kap több jogot (szkriptelt teszt), és a valódi modell nem követi (élő teszt)
 - [x] Vegyes eval-kérdések (SQL + dokumentum): `finql eval agent`, 10 kérdés (eszközök, idézett dokumentum, szám a válaszban, szivárgás, prompt-kinyerés)
-- [ ] Élő próba és eval Claude-dal: a „kész, ha” kérdés streamelve, és a 10 kérdés eredménye (API-kulcsra vár)
+- [x] Élő próba és eval Claude-dal: a „kész, ha” kérdés streamelve, és a 10 kérdés eredménye
 
 **Kész, ha:** „Hány 90+ napos késedelmes hitelünk van, és mi a teendő a szabályzat szerint?”
 egy válaszban, számmal és idézettel érkezik, streamelve.
@@ -203,8 +215,9 @@ egy válaszban, számmal és idézettel érkezik, streamelve.
 **Állapot:** a teljes út kész és tesztelt: a beszélgetés, a stream, az eszközök a felhasználó
 jogaival, a korlátok, a memória és az összefoglaló, a napló. A „kész, ha” kérdés API-kulcs
 nélkül is végigfut: a demóterv a pécsi fiókvezetőnek a saját fiókja számát adja, és a
-követeléskezelési szabályzatot idézi, streamelve. A valódi modellel ugyanez élő tesztként és az
-agent evaljaként fut, kulcsra vár.
+követeléskezelési szabályzatot idézi, streamelve. A valódi modellel (2026-10-27) az élő teszt
+zöld (szám és idézet, streamelve; a mérgezett dokumentumot nem követi), és az agent evalja
+**10/10**, 0 biztonsági hiba, 2,0 eszközhívás és ~12 600 token kérdésenként, p50 8,0 s.
 
 **Tanulságok:**
 - A tool runner helyett saját ciklus: minden lépést tárolni, költségkeretre ellenőrizni és

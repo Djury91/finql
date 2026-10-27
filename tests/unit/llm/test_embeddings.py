@@ -36,6 +36,7 @@ def voyage_answer(request: httpx.Request) -> httpx.Response:
 
 def voyage_with(
     respond: Callable[[httpx.Request], httpx.Response],
+    waits: list[float] | None = None,
 ) -> tuple[VoyageEmbedder, list[httpx.Request]]:
     sent: list[httpx.Request] = []
 
@@ -43,9 +44,19 @@ def voyage_with(
         sent.append(request)
         return respond(request)
 
+    async def sleep(seconds: float) -> None:  # records instead of waiting
+        if waits is not None:
+            waits.append(seconds)
+
     settings = make_settings(UNUSED_DB, voyage_api_key="test-key")
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return VoyageEmbedder(settings, client=client), sent
+    return VoyageEmbedder(settings, client=client, sleep=sleep), sent
+
+
+def responses(*answers: httpx.Response) -> Callable[[httpx.Request], httpx.Response]:
+    """The given responses in order, then a successful one."""
+    queue = list(answers)
+    return lambda request: queue.pop(0) if queue else voyage_answer(request)
 
 
 async def test_voyage_request_shape_and_answer_order() -> None:
@@ -90,6 +101,49 @@ async def test_voyage_failures_become_embedding_errors(
 
     with pytest.raises(EmbeddingError):
         await embedder.embed(["kérdés"], input_type="query")
+
+
+async def test_a_rate_limit_is_retried_after_the_wait_the_service_asks_for() -> None:
+    waits: list[float] = []
+    embedder, sent = voyage_with(
+        responses(httpx.Response(429, headers={"retry-after": "3"}), httpx.Response(503)), waits
+    )
+
+    vectors = await embedder.embed(["kérdés"], input_type="query")
+
+    assert len(vectors) == 1
+    assert len(sent) == 3
+    assert waits == [3.0, 2.0]  # Retry-After, then the backoff of the second attempt
+
+
+async def test_retries_are_limited() -> None:
+    waits: list[float] = []
+    embedder, sent = voyage_with(lambda _: httpx.Response(500), waits)
+
+    with pytest.raises(EmbeddingError):
+        await embedder.embed(["kérdés"], input_type="query")
+
+    assert len(sent) == VoyageEmbedder.MAX_RETRIES + 1
+    assert waits == [1.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(429, headers={"retry-after": "60"}),  # a per-minute quota: too long
+        httpx.Response(400, json={"detail": "bad request"}),
+        httpx.Response(401, json={"detail": "invalid key"}),
+    ],
+    ids=["long-retry-after", "bad-request", "bad-key"],
+)
+async def test_no_retry_when_waiting_would_not_help(response: httpx.Response) -> None:
+    waits: list[float] = []
+    embedder, sent = voyage_with(responses(response), waits)
+
+    with pytest.raises(EmbeddingError):
+        await embedder.embed(["kérdés"], input_type="query")
+
+    assert len(sent) == 1 and waits == []
 
 
 async def test_voyage_connection_failure_becomes_an_embedding_error() -> None:

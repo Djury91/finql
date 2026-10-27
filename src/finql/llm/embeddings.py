@@ -1,12 +1,13 @@
 """Text embeddings behind a provider-independent protocol (ADR-004): Voyage AI, and a deterministic
 hashing stand-in for tests and for running without an API key."""
 
+import asyncio
 import hashlib
 import math
 import re
 import time
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Literal, Protocol
 
 import httpx2 as httpx
@@ -47,13 +48,24 @@ class VoyageEmbedder:
     URL = "https://api.voyageai.com/v1/embeddings"
     # Well under the API limits (1000 texts, 320K tokens per request for voyage-4).
     BATCH_SIZE = 128
+    # A rate limit (429) or a server error (5xx) is retried, but briefly: a question waits for
+    # the answer. A longer Retry-After than the cap (a per-minute quota) fails at once.
+    MAX_RETRIES = 2
+    MAX_WAIT_SECONDS = 5.0
 
-    def __init__(self, settings: Settings, *, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        client: httpx.AsyncClient | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
         if settings.voyage_api_key is None:
             raise ValueError("FINQL_VOYAGE_API_KEY is not set")
         self._model = settings.embedding_model
         self._client = client or httpx.AsyncClient(timeout=settings.embedding_timeout_seconds)
         self._headers = {"Authorization": f"Bearer {settings.voyage_api_key.get_secret_value()}"}
+        self._sleep = sleep
 
     @property
     def model(self) -> str:
@@ -68,23 +80,25 @@ class VoyageEmbedder:
 
     async def _embed_batch(self, texts: Sequence[str], input_type: InputType) -> list[list[float]]:
         started = time.perf_counter()
-        try:
-            response = await self._client.post(
-                self.URL,
-                headers=self._headers,
-                json={
-                    "input": list(texts),
-                    "model": self._model,
-                    "input_type": input_type,
-                    "output_dimension": EMBEDDING_DIMENSIONS,
-                },
-            )
-        except httpx.HTTPError as exc:  # connection, timeout
-            logger.warning("embedding request failed", error=type(exc).__name__)
-            raise EmbeddingError() from exc
-        if response.is_error:
-            logger.warning("embedding request failed", status=response.status_code)
-            raise EmbeddingError()
+        payload = {
+            "input": list(texts),
+            "model": self._model,
+            "input_type": input_type,
+            "output_dimension": EMBEDDING_DIMENSIONS,
+        }
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                response = await self._client.post(self.URL, headers=self._headers, json=payload)
+            except httpx.HTTPError as exc:  # connection, timeout
+                logger.warning("embedding request failed", error=type(exc).__name__)
+                raise EmbeddingError() from exc
+            if not response.is_error:
+                break
+            wait = self._retry_wait(response, attempt)
+            logger.warning("embedding request failed", status=response.status_code, retry_in=wait)
+            if wait is None:
+                raise EmbeddingError()
+            await self._sleep(wait)
         body = response.json()
         data = sorted(body["data"], key=lambda item: item["index"])
         vectors: list[list[float]] = [item["embedding"] for item in data]
@@ -98,6 +112,17 @@ class VoyageEmbedder:
             latency_ms=round((time.perf_counter() - started) * 1000),
         )
         return vectors
+
+    def _retry_wait(self, response: httpx.Response, attempt: int) -> float | None:
+        """Seconds to wait before the next attempt, or None: do not retry."""
+        transient = response.status_code == 429 or response.status_code >= 500
+        if not transient or attempt == self.MAX_RETRIES:
+            return None
+        try:
+            wait = float(response.headers.get("retry-after", 2**attempt))
+        except ValueError:  # an HTTP date instead of seconds
+            wait = float(2**attempt)
+        return wait if 0 <= wait <= self.MAX_WAIT_SECONDS else None
 
     async def close(self) -> None:
         await self._client.aclose()

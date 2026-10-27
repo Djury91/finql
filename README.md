@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** a 0–7. fázis kész, a valódi modellel mért eredményekkel; a 8. (haladó) fázisból kész a hash-láncolt napló és az MCP-szerver. A nyilvános telepítés még hátravan. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** a 0–7. fázis kész, a valódi modellel mért eredményekkel; a 8. (haladó) fázisból kész a hash-láncolt napló, az MCP-szerver és az OpenTelemetry-nyomkövetés. A nyilvános telepítés még hátravan. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ![Demó: a pécsi fiókvezető kérdez, a válasz streamelve jön, az SQL-lel, az eredménnyel és az idézett szabályzattal](docs/img/demo.gif)
 
@@ -238,6 +238,20 @@ A szerver a repó `.env`-jéből olvassa az adatbázist és a modellt (a `--dire
 adatbázisnak futnia kell (`uv run poe db-up`). Egy fiókvezetővel bejelentkezve a kliens is csak
 a fiók adatait látja, az auditor pedig adateszközt sem kap.
 
+### Nyomkövetés (OpenTelemetry)
+
+```bash
+docker compose --profile observability up -d jaeger   # helyi Jaeger, http://127.0.0.1:16686
+# .env: FINQL_OTEL_ENDPOINT=http://127.0.0.1:4318, majd az alkalmazás újraindítása
+```
+
+Egy kérés egy nyom: a FastAPI-kérés, az agent fordulója, az eszközök, a text-to-SQL lépései, a
+modell- és embeddinghívások és minden SQL-utasítás, egymásba ágyazva. A text-to-SQL span a
+`query_log` azonosítóját is viszi, így a nyomból a naplóhoz lehet jutni. A nyomban nincs kérdés,
+válasz, dokumentum vagy adatsor ([ADR-014](docs/02-technologiai-dontesek.md)).
+
+![Egy agent-válasz nyoma: a 11,6 másodpercből kb. 10 a modellhívás, a lekérdezés 82 ms](docs/img/trace.png)
+
 ### Fejlesztői parancsok
 
 | Parancs | Mit csinál |
@@ -259,7 +273,7 @@ a fiók adatait látja, az auditor pedig adateszközt sem kap.
 | Agent, 10 vegyes kérdés (eszközök, idézet, helyes szám) | 4/10 a fix tervvel, 0 biztonsági hiba: csak a harness próbája | **10/10**, 0 biztonsági hiba, 2,0 eszközhívás/kérdés |
 | Késleltetés p50 / p95 | – | text-to-SQL 3,2 / 5,1 s; agent 8,0 / 13,7 s |
 | Token / kérdés | – | text-to-SQL ~7 200 (few-shottal ~7 700); agent ~12 600 |
-| Tesztek | 614 (unit + valódi Postgres testcontainersszel), és a `docker compose up` füstpróbája; CI-ban minden PR-en | + 8 élő teszt a valódi modellel, köztük a mérgezett dokumentum: 8/8 |
+| Tesztek | 624 (unit + valódi Postgres testcontainersszel), és a `docker compose up` füstpróbája; CI-ban minden PR-en | + 8 élő teszt a valódi modellel, köztük a mérgezett dokumentum: 8/8 |
 
 A kulcs nélküli számok azt mutatják, hogy a mérőeszközök helyesen mérnek; a modell minőségét a
 jobb oldali oszlop mondja meg. A mérés napja 2026-10-27, `small` skála; a riportok:

@@ -9,9 +9,14 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from finql.core.telemetry import telemetry_enabled, trace_engine
+
 
 def create_engine(url: str) -> AsyncEngine:
-    return create_async_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    engine = create_async_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=5)
+    if telemetry_enabled():  # a span per statement (telemetry.py)
+        trace_engine(engine)
+    return engine
 
 
 def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

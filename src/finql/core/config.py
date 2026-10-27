@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # ADR-004: the cheap model for the cheap task (conversation summary).
     summary_model: str = "claude-haiku-5-5"
 
+    # --- Tracing (OpenTelemetry, ADR-014) ---
+    # OTLP/HTTP collector base URL, e.g. http://127.0.0.1:4318 (Jaeger). Unset: tracing is off.
+    otel_endpoint: str | None = None
+    otel_service_name: str = "finql"
+
     # --- MCP server (`finql mcp`, ADR-013) ---
     # The FinQL user the server acts as: every tool runs with this user's rights, like the API.
     # The MCP client (e.g. Claude Desktop) passes them in its server configuration.

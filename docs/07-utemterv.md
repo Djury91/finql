@@ -275,7 +275,7 @@ nyilvános telepítéshez Railway-fiók kell; a konfiguráció és a lépések k
 
 ## 8. fázis – Haladó (válogatható)
 
-- [ ] OpenTelemetry-trace (FastAPI → LLM → DB), vagy Langfuse az LLM-hívásokhoz
+- [x] OpenTelemetry-trace (FastAPI → LLM → DB), vagy Langfuse az LLM-hívásokhoz (OpenTelemetry, helyben Jaegerrel; ADR-014)
 - [x] Hash-láncolt `query_log` (`prev_hash`, `row_hash`): a naplóból törölt vagy módosított sor kimutatható (az `answer_log` is; ADR-012)
 - [x] MCP-szerver: a `query_database` és a `search_documents` eszköz MCP-n keresztül, így Claude Desktopból is használható (`finql mcp`, ADR-013)
 - [ ] Szemantikus válasz-cache (hasonló kérdés + ugyanaz a szerepkör → cache-elt SQL)
@@ -318,3 +318,23 @@ maradt.
 - Egy MCP-szervert a kliens indít, tetszőleges munkakönyvtárból: a munkakönyvtárhoz relatív
   fájlútvonal (`data/metrics.yaml`) ott elhasalt volna. A stdio-teszt ezért idegen könyvtárból
   indít.
+
+**Állapot – nyomkövetés:** egy kérés egy nyom, a FastAPI-kéréstől a modellhívásokon és az
+eszközökön át minden SQL-utasításig. A Jaeger egy Compose-profil mögött fut. Élő próba a
+valódi modellel: a „kész, ha” kérdés nyoma 52 span, 11,6 s, ebből kb. 10 s a három
+modellhívás, a lekérdezés 82 ms. 9 teszt: 5 integrációs, 4 egység.
+
+**Tanulságok – nyomkövetés:**
+- Két hibát csak a valódi nyom mutatott meg, a zöld egységtesztek nem. (1) Az OpenTelemetry
+  SQLAlchemy-csomagja a 2.1-es SQLAlchemyvel csendben semmit nem mér; helyette saját, kb. 40
+  soros eseménykezelő mér. (2) A streamelt válasz minden darabja külön `http send` spant kapott,
+  több százat egy kérésben.
+- Az Anthropic SDK és az MCP SDK maga is spanokat készít. A saját modellhívás-spant ezért
+  kivettük. Az SDK egy környezeti változóra a prompt szövegét is rögzítené; ezt kódban tiltjuk,
+  és a teszt a tiltás nélkül elbukik.
+- Egy aszinkron generátor köré nem lehet `with`-tel spant tenni: a `yield` a span kontextusát a
+  hívóban hagyná. A `traced_stream` a kontextust csak a generátor lépéseire kapcsolja be.
+- Az MCP-szerver stdio-ját a naplózás is szennyezte: a konfigurálatlan structlog a stdout-ra ír,
+  és az indulási sor a protokoll csatornájára ment. Egy teszt most a teljes stdout-ot nézi.
+- A nyom megmutatta, hová megy az idő: a válaszidő szinte csak modellidő. Egy gyorsításnak
+  ezért a modellhívások számánál és méreténél kell kezdődnie, nem az SQL-nél.

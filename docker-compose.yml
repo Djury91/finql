@@ -3,6 +3,8 @@ name: finql
 # `docker compose up`: adatbázis → előkészítés (setup) → alkalmazás, http://127.0.0.1:8000.
 # A fejlesztéshez elég az adatbázis: `docker compose up -d --wait db` (poe db-up), az alkalmazás
 # pedig a gépen fut (poe dev).
+# Nyomkövetés: `docker compose --profile observability up -d jaeger`, és a .env-ben
+# FINQL_OTEL_ENDPOINT=http://127.0.0.1:4318; a felület: http://127.0.0.1:16686 (ADR-014).
 
 x-finql: &finql
   build: .
@@ -16,6 +18,9 @@ x-finql: &finql
     FINQL_DB_HOST: db:5432
     # Konténerben JSON-log (a .env FINQL_ENV=dev értéke mellett is), felülírható a .env-ben.
     FINQL_LOG_JSON: ${FINQL_LOG_JSON:-true}
+    # Ha a .env bekapcsolja a nyomkövetést (a gépről: 127.0.0.1:4318), a konténerből ugyanaz a
+    # Jaeger a Compose-hálózat `jaeger` nevén érhető el. Üresen marad, ha a .env nem kapcsolja be.
+    FINQL_OTEL_ENDPOINT: ${FINQL_OTEL_ENDPOINT:+http://jaeger:4318}
 
 services:
   db:
@@ -56,6 +61,15 @@ services:
       setup:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  # Nyomkövetés (OpenTelemetry): csak a profillal indul. OTLP/HTTP a 4318-as porton, a felület a
+  # 16686-on. Memóriában tárol: újraindításkor a nyomok elvesznek, helyi nézegetőnek ennyi elég.
+  jaeger:
+    image: jaegertracing/jaeger:2.22.0
+    profiles: [observability]
+    ports:
+      - "127.0.0.1:16686:16686"
+      - "127.0.0.1:4318:4318"
 
 volumes:
   pgdata:

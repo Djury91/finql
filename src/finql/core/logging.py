@@ -20,8 +20,11 @@ logger = structlog.get_logger("finql.request")
 
 
 def configure_logging(level: str = "INFO", *, json_logs: bool) -> None:
+    from finql.core.telemetry import log_trace_ids
+
     shared: list[Any] = [
         structlog.contextvars.merge_contextvars,
+        log_trace_ids,
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso", utc=True),

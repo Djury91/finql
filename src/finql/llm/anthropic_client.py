@@ -26,6 +26,23 @@ MISSING_CREDENTIALS = (
 
 type Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
+# The SDK traces every API call itself (OpenTelemetry GenAI conventions: model, tokens, cache,
+# time to first chunk), under whatever span is current: no span of ours needed. Pinned here,
+# not left to the environment: metadata only, never the prompt or the answer (bank data, see
+# core/telemetry.py), and no trace header sent to the API.
+SDK_TELEMETRY: Any = {"propagation": False, "traces": {"content_mode": "metadata_only"}}
+
+
+def sdk_client(settings: Settings, **options: Any) -> anthropic.AsyncAnthropic:
+    """`options`: tests pass a mocked HTTP client."""
+    api_key = settings.anthropic_api_key
+    return anthropic.AsyncAnthropic(
+        api_key=api_key.get_secret_value() if api_key else None,
+        timeout=settings.llm_timeout_seconds,
+        open_telemetry=SDK_TELEMETRY,
+        **options,
+    )
+
 
 class AnthropicClient:
     """Both LLM interfaces: single-turn structured answers (`LLMClient`) and the agent's streamed
@@ -41,11 +58,7 @@ class AnthropicClient:
         effort: Effort | None = None,
         refusal_fallback: bool | None = None,
     ):
-        api_key = settings.anthropic_api_key
-        self._client = client or anthropic.AsyncAnthropic(
-            api_key=api_key.get_secret_value() if api_key else None,
-            timeout=settings.llm_timeout_seconds,
-        )
+        self._client = client or sdk_client(settings)
         self._model = model or settings.llm_model
         self._effort = effort or settings.llm_effort
         self._max_tokens = settings.llm_max_tokens

@@ -26,7 +26,7 @@ finql/
 ├── .pre-commit-config.yaml
 ├── Dockerfile                     # kétlépcsős build (uv), nem root, parancsok: serve, setup
 ├── .dockerignore                  # titkok, privát jegyzetek, tesztek, cache-ek kimaradnak
-├── docker-compose.yml             # db (pgvector/pgvector:pg18) → setup → app
+├── docker-compose.yml             # db (pgvector/pgvector:pg18) → setup → app; jaeger (observability profil)
 ├── railway.json                   # PaaS: build a Dockerfile-ból, pre-deploy setup, /ready
 ├── alembic.ini
 │
@@ -43,7 +43,7 @@ finql/
 │
 ├── docs/                          # ez a dokumentáció
 │   ├── 01-projekt-terv.md … 08-telepites.md
-│   └── img/                       # demo.gif, chat.png (scripts/capture_demo.py)
+│   └── img/                       # demo.gif, chat.png (scripts/capture_demo.py), trace.png (Jaeger)
 │
 ├── db/                            # DB-FIRST rész: kézzel írt, review-zott SQL
 │   ├── roles/                     # 001_roles.sql: szerepkörök, DB-tulajdon (`finql db bootstrap` futtatja)
@@ -81,6 +81,7 @@ finql/
 │   │   ├── db.py                  # két engine: app_engine (finql_app), llm_engine (finql_llm_reader)
 │   │   ├── bootstrap.py           # szerepkörök + jelszavak a kapcsolati URL-ekből (adminnal)
 │   │   ├── sql_files.py           # a db/ SQL-fájljainak futtatása Alembicből
+│   │   ├── telemetry.py           # OpenTelemetry: beállítás, SQL-spanok, traced_stream (ADR-014)
 │   │   ├── logging.py             # structlog, request_id
 │   │   ├── security.py            # JWT, jelszó-hash (Argon2id)
 │   │   ├── deps.py                # közös függőségek: DbSession, AppSettings
@@ -202,6 +203,7 @@ finql/
     │   ├── rag/test_chunking.py
     │   ├── agent/test_memory.py   # előzmény, összefoglalás; test_tools.py: eszközök, hibák
     │   ├── test_web.py            # az oldal, a CSP, nincs inline kód, nincs HTML-értelmezés
+    │   ├── test_telemetry.py      # traced_stream: beágyazás, korai lezárás, hiba; trace_id a logban
     │   └── …
     └── integration/
         ├── test_security.py       # RLS (saját fiók / minden fiók / kontextus nélkül 0 sor), írás, PII
@@ -213,7 +215,8 @@ finql/
         ├── test_rag.py            # betöltés, hibrid keresés, olvasási szint, idézett válasz, napló
         ├── test_agent.py          # SSE, eszközök, korlátok, memória, keret, zár, mérgezett dokumentum
         ├── test_audit_chain.py    # hash-lánc: egyidejű írók, módosítás/törlés/átkötés, horgony, CLI
-        └── test_mcp.py            # MCP: eszközök szerepkörönként, adatkör, napló, letiltás, stdio-alfolyamat
+        ├── test_mcp.py            # MCP: eszközök szerepkörönként, adatkör, napló, letiltás, stdio (a stdout tiszta)
+        └── test_telemetry.py      # nyomkövetés: span-fa, naplóazonosító, hibás span, banki adat nélkül
 ```
 
 ## Konvenciók

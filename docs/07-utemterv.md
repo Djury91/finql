@@ -85,7 +85,7 @@ integrációs tesztek zöldek. Kézzel írt SQL-lel megválaszolható a [projekt
 - [x] `schema_context.py`: katalógus betöltése az `analytics` sémából, cache, kompakt szöveges formátum
 - [x] `prompts/text_to_sql.v1.md`: szerep, szabályok, séma, példák, kimeneti séma
 - [x] `generator.py`: strukturált kimenet (`sql`, `explanation`, `assumptions`)
-- [x] `validator.py`: a [biztonsági dokumentum](05-text-to-sql-biztonsag.md) összes szabálya, és 79 rosszindulatú tesztminta
+- [x] `validator.py`: a [biztonsági dokumentum](05-text-to-sql-biztonsag.md) összes szabálya, és 80 rosszindulatú tesztminta
 - [x] `cost_guard.py`: EXPLAIN-küszöb (a `large` skálán kalibrálva, ADR-006)
 - [x] `executor.py`: `BEGIN READ ONLY`, `set_config(…, true)`, sorlimit, időmérés
 - [x] Önjavító ciklus SQL-hibára (max. 2 kör), tiltott szándéknál nincs újrapróbálás

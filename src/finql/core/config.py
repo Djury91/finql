@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     # gives the model more to get wrong.
     rag_top_k: int = Field(default=5, ge=1, le=20)
 
+    # --- Agent (chat) ---
+    # Tool calls per user message; after the last one the model must answer from what it has.
+    agent_max_tool_calls: int = Field(default=6, ge=1, le=20)
+    # One user message, all model turns and tools together.
+    agent_timeout_seconds: float = Field(default=120, gt=0)
+    # Earlier turns kept word for word. Beyond this the oldest are summarized, and half stays.
+    agent_history_turns: int = Field(default=8, ge=2, le=50)
+    # ADR-004: the cheap model for the cheap task (conversation summary).
+    summary_model: str = "claude-haiku-5-5"
+
     @property
     def json_logs(self) -> bool:
         return self.log_json if self.log_json is not None else self.env != "dev"

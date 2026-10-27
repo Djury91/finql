@@ -84,14 +84,18 @@ finql/
 │   │   └── admin.py               # felhasználókezelés a CLI-ből (fiókkód → branch_id)
 │   │
 │   ├── llm/                       # provider-független LLM-réteg
-│   │   ├── client.py              # LLMClient protokoll
-│   │   ├── anthropic_client.py    # Claude-implementáció
+│   │   ├── client.py              # LLMClient protokoll (egylépéses, strukturált válasz)
+│   │   ├── chat.py                # ChatModel protokoll: egy streamelt modellforduló eszközökkel
+│   │   ├── anthropic_client.py    # Claude-implementáció (mindkét protokoll)
 │   │   ├── fake_client.py         # determinisztikus mock a tesztekhez
+│   │   ├── fake_chat.py           # szkriptelt agent-modell a tesztekhez
 │   │   ├── embeddings.py          # Embedder protokoll + Voyage, hash-alapú (kulcs nélkül)
 │   │   ├── usage.py               # token- és költségnaplózás, felhasználói keret
 │   │   └── prompts/               # verziózott promptok (.md / .j2)
 │   │       ├── text_to_sql.v1.md
-│   │       └── rag_answer.v1.md
+│   │       ├── rag_answer.v1.md
+│   │       ├── agent.v1.md
+│   │       └── conversation_summary.v1.md
 │   │
 │   ├── text_to_sql/
 │   │   ├── router.py              # POST /query, GET /query/history, GET /schema
@@ -118,9 +122,12 @@ finql/
 │   │   └── schemas.py
 │   │
 │   ├── agent/
-│   │   ├── router.py              # beszélgetések, SSE stream
-│   │   ├── service.py             # tool-use ciklus, korlátok
-│   │   ├── tools.py               # query_database, search_documents, describe_schema, …
+│   │   ├── router.py              # beszélgetések, SSE stream, egy válasz egyszerre (zár)
+│   │   ├── service.py             # tool-use ciklus: korlátok, események, hivatkozás-ellenőrzés
+│   │   ├── tools.py               # query_database, search_documents, describe_schema, get_metric_definition
+│   │   ├── memory.py              # üzenetek tárolása, előzmény, összefoglaló (Haiku)
+│   │   ├── metrics.py             # üzleti mutatók katalógusa (data/metrics.yaml)
+│   │   ├── demo.py                # kulcs nélküli mód: fix terv, az eszközök eredményét idézi
 │   │   ├── models.py              # Conversation, Message
 │   │   └── schemas.py
 │   │
@@ -133,11 +140,12 @@ finql/
 │   │   ├── store.py               # eval_runs / eval_results
 │   │   ├── oracle.py              # ál-LLM az elvárt SQL-lel: a harness önellenőrzése
 │   │   ├── retrieval.py           # dokumentumkeresés: recall@5, MRR, szivárgás (`finql eval retrieval`)
+│   │   ├── agent.py               # agent: eszközök, idézet, szám a válaszban (`finql eval agent`)
 │   │   ├── models.py              # EvalRun, EvalResult
 │   │   └── run.py                 # a CLI-parancsok összekötése (beállítások → futás → riport)
 │   │
 │   ├── audit/
-│   │   ├── router.py              # GET /audit/queries (auditor)
+│   │   ├── router.py              # GET /audit/queries, /audit/conversations (auditor)
 │   │   ├── service.py             # log_query(...): saját tranzakcióban
 │   │   ├── models.py              # QueryLog
 │   │   └── schemas.py
@@ -152,6 +160,7 @@ finql/
 │
 ├── data/
 │   ├── sql_examples.yaml          # few-shot példák (kérdés + SQL), `finql examples sync`
+│   ├── metrics.yaml               # üzleti mutatók: definíció, számítás (get_metric_definition)
 │   └── documents/                 # 20 szintetikus banki dokumentum (md + YAML-fejléc), `finql ingest`
 │       ├── README.md              # a fejléc formátuma (nem töltődik be)
 │       ├── hirdetmeny-kamatok.md
@@ -162,7 +171,8 @@ finql/
 │   ├── datasets/
 │   │   ├── golden.yaml            # 50 kérdés: elvárt SQL, nehézség, címkék, szerepkör
 │   │   ├── adversarial.yaml       # 20 elutasítandó kérdés, kategóriánként
-│   │   └── retrieval.yaml         # 20 dokumentumkeresési kérdés: elvárt dokumentum, szerepkör
+│   │   ├── retrieval.yaml         # 20 dokumentumkeresési kérdés: elvárt dokumentum, szerepkör
+│   │   └── agent.yaml             # 10 agent-kérdés: eszközök, idézendő dokumentum, elvárt szám
 │   └── reports/                   # generált markdown-riportok (gitignore, kivéve a kiemelteket)
 │
 └── tests/
@@ -171,6 +181,7 @@ finql/
     │   ├── text_to_sql/test_validator.py
     │   ├── eval/test_compare.py   # mikor ugyanaz a válasz; test_datasets.py: szivárgásőr
     │   ├── rag/test_chunking.py
+    │   ├── agent/test_memory.py   # előzmény, összefoglalás; test_tools.py: eszközök, hibák
     │   └── …
     └── integration/
         ├── test_security.py       # RLS (saját fiók / minden fiók / kontextus nélkül 0 sor), írás, PII
@@ -179,7 +190,8 @@ finql/
         ├── test_query_api.py
         ├── test_examples.py       # few-shot: sync, kiválasztás, prompt és napló
         ├── test_eval.py           # orákulum: 100%; szkriptelt válaszok bírálata
-        └── test_rag.py            # betöltés, hibrid keresés, olvasási szint, idézett válasz, napló
+        ├── test_rag.py            # betöltés, hibrid keresés, olvasási szint, idézett válasz, napló
+        └── test_agent.py          # SSE, eszközök, korlátok, memória, keret, zár, mérgezett dokumentum
 ```
 
 ## Konvenciók

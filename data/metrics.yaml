@@ -1,0 +1,82 @@
+# Üzleti mutatók és fogalmak: az agent get_metric_definition eszköze innen válaszol
+# (finql/agent/metrics.py). Egy mutató egy helyen van definiálva, így a kérdésre írt SQL és a
+# válasz szövege ugyanazt érti „aktív ügyfélen” vagy „NPL-rátán”.
+#
+# - definition: a fogalomtár (data/documents/fogalomtar.md) meghatározása.
+# - computation: hogyan számolható az analytics nézetekből (a text-to-SQL ezt a nevet érti).
+# - aliases: a kérdésekben előforduló más nevek; a keresés kis- és nagybetűtől, ékezettől független.
+# - note: ahol a nézetekből csak közelítés számolható, itt áll, miben tér el.
+
+metrics:
+  - name: aktív ügyfél
+    aliases: [active customer, aktív ügyfelek]
+    definition: Az az ügyfél, akinek van legalább egy nem megszüntetett (aktív vagy zárolt) számlája.
+    computation: "customers.is_active = true"
+
+  - name: ügyfélszegmens
+    aliases: [szegmens, segment, lakossági, prémium, kkv, nagyvállalat]
+    definition: >-
+      retail (lakossági magánszemély), premium (havi jóváírás legalább 750 000 Ft vagy legalább
+      10 000 000 Ft megtakarítás), sme (kkv: 4 milliárd Ft alatti éves árbevétel), corporate
+      (nagyvállalat: legalább 4 milliárd Ft éves árbevétel).
+    computation: "customers.segment"
+
+  - name: új számla
+    aliases: [számlanyitás, új számlák, new accounts]
+    definition: A vizsgált időszakban nyitott számla, a nyitás napja szerint.
+    computation: "accounts.opened_at az időszakban; count(*)"
+
+  - name: kártyás költés
+    aliases: [kártyás forgalom, card spend, kártyás vásárlás, költés]
+    definition: >-
+      A kártyás vásárlások (nem a készpénzfelvétel) összege forintban, pozitív számként; a devizás
+      vásárlás a terhelés napi árfolyamán számít.
+    computation: "-sum(transactions.amount_huf) WHERE channel = 'card' AND amount < 0; havi trendhez monthly_account_summary.card_spend_huf"
+
+  - name: üzleti nap
+    aliases: [ma, mai nap, business day, idén, tavaly]
+    definition: >-
+      A legutolsó lezárt banki nap. Minden relatív időszak („ma”, „idén”, „tavaly”, „az elmúlt 3
+      hónap”) ehhez viszonyít, nem a naptári mai naphoz.
+    computation: "business_day.business_date"
+
+  - name: élő hitel
+    aliases: [aktív hitel, élő hitelek, active loan]
+    definition: A nem lezárt (active státuszú) hitel.
+    computation: "loans.status = 'active'"
+
+  - name: késedelmes hitel
+    aliases: [késő hitel, késedelem, lejárt hitel, delinquent loan]
+    definition: Az a hitel, amelynek van lejárt, meg nem fizetett esedékessége.
+    computation: "loans.days_past_due > 0"
+
+  - name: késedelmi napok (DPD)
+    aliases: [dpd, days past due, késedelmi napok száma, késedelmi sáv, dpd sáv]
+    definition: >-
+      A legrégebbi meg nem fizetett esedékességtől az üzleti napig eltelt napok száma. Sávjai:
+      0, 1–30, 31–60, 61–90, 90+.
+    computation: "loans.days_past_due; sávok: loans.dpd_bucket ('0', '1-30', '31-60', '61-90', '90+')"
+
+  - name: nem teljesítő hitel (NPL)
+    aliases: [npl, nem teljesítő, 90 napon túli késedelem, 90+ napos késedelem, default]
+    definition: >-
+      A 90 napnál többet késő hitel. A követeléskezelési szabályzat szerint ilyenkor a hitel nem
+      teljesítő (default) besorolást kap.
+    computation: "loans.dpd_bucket = '90+' (azonos a days_past_due > 90 feltétellel)"
+
+  - name: NPL-ráta
+    aliases: [npl arány, nem teljesítő arány]
+    definition: >-
+      A nem teljesítő hitelek tőketartozása osztva az összes élő hitel tőketartozásával,
+      százalékban. A bank célja, hogy 3% alatt maradjon.
+    computation: >-
+      100 * sum(remaining_amount) FILTER (WHERE dpd_bucket = '90+') / sum(remaining_amount),
+      az élő hitelekre (loans.status = 'active')
+    note: >-
+      A nézetben a hátralévő tartozás (remaining_amount) tőkét és kamatot is tartalmaz, ezért ez a
+      tőketartozás-alapú ráta közelítése.
+
+  - name: kockázati besorolás
+    aliases: [kockázat, risk rating, kockázati kategória]
+    definition: Az ügyfél alacsony (low), közepes (medium) vagy magas (high) kockázatú besorolása.
+    computation: "customers.risk_rating"

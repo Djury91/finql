@@ -3,7 +3,7 @@
 > Kérdezz magyarul, és a FinQL biztonságos, ellenőrzött SQL-t futtat egy banki mintaadatbázison.
 > A belső szabályzatokból is idézve válaszol, és minden lépést naplóz.
 
-**Státusz:** 5. fázis: a dokumentumkeresés (RAG) kész: 20 szintetikus szabályzat, hibrid keresés, olvasási szint az SQL-ben, idézett válaszok. A 4. fázis eval harnessével együtt a valódi modellel mért számok API-kulcsra várnak. Lásd: [ütemterv](docs/07-utemterv.md)
+**Státusz:** 6. fázis: az agent kész: egy beszélgetésben SQL és dokumentum együtt, streamelve (SSE), eszközhívási korlátokkal, memóriával és naplóval. A valódi modellel mért számok (eval) API-kulcsra várnak. Lásd: [ütemterv](docs/07-utemterv.md)
 
 ---
 
@@ -13,7 +13,7 @@
 |---|---|---|
 | **Text-to-SQL** | „Melyik 5 fiókban nőtt legjobban a kártyás költés az előző negyedévhez képest?” | LLM → SQL → validálás (sqlglot) → költségbecslés (EXPLAIN) → read-only futtatás |
 | **RAG** | „Mekkora a késedelmi kamat a személyi kölcsönnél?” | Postgres + pgvector, hibrid (vektoros + full-text) keresés, forrásmegjelöléssel |
-| **Agent** | „Hány ügyfelünk késik 90 napnál többet, és mit ír erről a behajtási szabályzat?” | Eszközhívás: az LLM a saját SQL- és dokumentumkereső eszközeinket hívja |
+| **Agent** | „Hány 90+ napos késedelmes hitelünk van, és mi a teendő a szabályzat szerint?” | Eszközhívás: az LLM a saját SQL- és dokumentumkereső eszközeinket hívja, a választ streameli (SSE) |
 | **Jogosultság** | A fiókvezető csak a saját fiókja adatait látja | PostgreSQL Row-Level Security + szerepkörök |
 | **Audit** | Minden kérdés, generált SQL, elutasítás és tokenköltség naplózva | Csak hozzáfűzhető (append-only) `query_log` |
 | **Értékelés** | 50 „arany” és 20 rosszindulatú kérdés, végrehajtási pontosság mérése | Saját eval harness, riport, futások az adatbázisban |
@@ -115,6 +115,35 @@ uv run finql eval retrieval           # 20 kérdés: recall@5, MRR, és nem sziv
 Kulcs nélkül: `FINQL_EMBEDDING_PROVIDER=hashing` (lexikális hasonlóság), és embedding nélkül is
 működik a keresés, csak szöveges módban. `FINQL_LLM_PROVIDER=fake` esetén a válasz a legjobb
 forrás eleje, idézve. A döntések: [ADR-008](docs/02-technologiai-dontesek.md).
+
+### Agent (beszélgetés)
+
+Egy beszélgetésben adat és szabályzat együtt: az agent maga dönti el, hogy az adatbázist
+kérdezi (`query_database`, a teljes text-to-SQL láncon), a dokumentumokban keres
+(`search_documents`), vagy egy üzleti fogalom definícióját nézi meg (`get_metric_definition`).
+Minden eszköz a felhasználó jogaival fut.
+
+```bash
+TOKEN=...   # POST /auth/token
+ID=$(curl -s -X POST 127.0.0.1:8000/chat/conversations -H "Authorization: Bearer $TOKEN" | jq -r .id)
+curl -N -X POST 127.0.0.1:8000/chat/conversations/$ID/messages   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"   -d '{"content": "Hány 90+ napos késedelmes hitelünk van, és mi a teendő a szabályzat szerint?"}'
+```
+
+A válasz Server-Sent Events stream: `turn_start`, `text` (szövegdarabok), `tool_start` és
+`tool_result` (melyik eszköz, milyen bemenettel, mi lett: SQL, sorok, források), végül `done`:
+a végleges válasz, a hivatkozott forrásokkal. Üzenetenként legfeljebb 6 eszközhívás, és a napi
+tokenkeret minden modellhívás előtt ellenőrizve. A következő üzenet látja a korábbiakat, a hosszú
+beszélgetést egy olcsó modell összefoglalja. Minden lépés a csak hozzáfűzhető `messages` táblába
+kerül: `GET /chat/conversations/{id}` (saját; az auditor bárkiét), `GET /audit/conversations`.
+
+```bash
+uv run finql eval agent               # 10 vegyes kérdés: eszközök, idézett dokumentum, helyes szám
+uv run finql eval agent --llm demo    # ugyanez API-kulcs nélkül (a harness próbája)
+```
+
+`FINQL_LLM_PROVIDER=fake` esetén egy fix terv fut modell helyett: a projektterv példakérdését az
+adatbázisból, a kérdést a dokumentumokból kérdezi le, és az eredményt idézi. A döntések:
+[ADR-009](docs/02-technologiai-dontesek.md).
 
 ### Fejlesztői parancsok
 

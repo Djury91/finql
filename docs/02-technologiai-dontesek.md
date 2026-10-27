@@ -122,7 +122,7 @@ végzi. Egy kevesebb rendszer, amit üzemeltetni kell.
 
 ### ADR-004: LLM-provider absztrakció, Claude az alapértelmezett
 
-- `LLMClient` protokoll (`generate_structured` a 3. fázistól; `stream`, `tool_call` a 6. fázisban). Az implementáció cserélhető (Anthropic, helyi Ollama, mock a tesztekhez).
+- `LLMClient` protokoll (`generate_structured` a 3. fázistól), és az agenthez `ChatModel` (`stream_turn`: egy streamelt modellforduló eszközökkel, 6. fázis, ADR-009). Az implementáció cserélhető (Anthropic, helyi Ollama, mock a tesztekhez).
 - Alapértelmezett modellek (környezeti változóból felülírhatók):
   - SQL-generálás és agent: `claude-sonnet-5-5`
   - Olcsó feladatok (routing, összefoglalás, címadás): `claude-haiku-5-5`
@@ -232,6 +232,65 @@ ellenőrizhetetlen válasz rosszabb a semminél.
 szerepelnek (pl. `hirdetmeny-kamatok.md@2#3`), nem részletazonosítóval: egy újratöltés új
 részleteket ír, a verzió viszont megmondja, melyik szövegre épült a válasz.
 
+### ADR-009: Agent – saját eszközhívási ciklus, válasz-memória, SSE
+
+**Saját ciklus, nem az SDK tool runnere:** az Anthropic SDK tool runnere a ciklust magától
+vinné. Itt viszont minden lépésnek több dolga van: üzenetként tárolni kell, tokenkeretet kell
+ellenőrizni előtte, eseményként streamelni kell, és határidőn belül kell maradnia. A ciklus
+ráadásul a `ChatModel` protokollon fut (`llm/chat.py`), így a tesztek szkriptelt modellel
+(`FakeChatModel`), a kulcs nélküli demó egy fix tervvel ugyanazt az utat járja. A szolgáltatói
+réteg csak egy modellfordulót streamel (`stream_turn`); a ciklus, a korlátok és a hibakezelés
+szolgáltatófüggetlen (`agent/service.py`).
+
+**Korlátok üzenetenként:**
+- Legfeljebb 6 eszközhívás. Utána a modell eszközt már nem hívhat (`tool_choice: none`), a
+  meglévő eredményekből kell válaszolnia; a korlát fölötti párhuzamos hívások hibaeredményt
+  kapnak.
+- A napi tokenkeret minden modellhívás előtt ellenőrizve, így a túllépés legfeljebb egy forduló.
+- Egy határidő az egész üzenetre (modellhívások és eszközök együtt). Az időkorlát soha nem fog
+  át egy `yield`-et: az, hogy a kliens mennyi idő alatt olvassa ki az eseményt, nem a modell ideje.
+
+**Eszközönkénti hibakezelés:** a bemenetet a kód validálja a Pydantic-modell alapján. Az
+elutasított SQL, az időtúllépés vagy egy ismeretlen eszköz hibaeredmény a modellnek, nem a
+forduló vége. A modell így elmagyarázhatja, vagy másként próbálkozhat. Váratlan hibánál a
+modell nem látja a belső részleteket, csak annyit, hogy hiba történt.
+
+**Jogosultság:** minden eszköz a felhasználó jogaival fut: a `query_database` a teljes
+text-to-SQL láncon megy át (validátor, költségőr, RLS), a `search_documents` az olvasási
+szinttel szűr. Az eszközkészlet szerepkörfüggő: az auditor nem kap adateszközt, mert nem lát
+banki adatot. Egy mérgezett dokumentum ezért legfeljebb azt érheti el, hogy a modell olyat
+kérdezzen, amit a felhasználó maga is kérdezhetne.
+
+**Memória: kérdés és végső válasz, nem a teljes átirat.** A következő üzenet előzménye a
+korábbi kérdések és végső válaszok, a korábbi eszközhívások és gondolkodási blokkok nélkül. A
+végső válasz a forduló eredménye, egy visszakérdezés („és fiókonként?”) újra hívhatja az
+eszközöket. Az előzmény minden fordulóban ugyanúgy renderelődik, így a prompt-cache működik. A
+gondolkodási blokkokat (aláírással) csak a fordulón belül küldjük vissza változatlanul; ott
+kötelező, máshol nincs rájuk szükség. 8 korábbi forduló fölött a régebbi fordulókat egy olcsó
+modell (Haiku) összefoglalja, és a legutóbbi fele szó szerint marad. Kötegben, nem
+fordulónként, hogy a cache-elt előtag a kötegek között változatlan maradjon.
+
+**Prompt-cache:** fix töréspont a rendszerprompt végén (szabályok és eszközök, minden
+beszélgetésben azonosak), és automatikus töréspont a növekvő beszélgetés végén. A forduló
+közben nem váltunk modellt (nincs refusal-fallback az agentnél): egy másik modell nem
+fogadná el az előző gondolkodási blokkjait.
+
+**SSE, a FastAPI natív `EventSourceResponse`-ával:** események: `turn_start`, `text`,
+`tool_start`, `tool_result`, `done`, `error`. Ami a stream előtt eldől (nem létező vagy más
+beszélgetése, elfogyott keret, már futó válasz), az függőségben dől el, így rendes JSON-hibát
+kap. A stream közbeni hibák `error` eseményként jönnek. A streamelt szöveg hivatkozásait a
+`done` esemény ellenőrzi: a kliens annak `answer` mezőjét mutatja végső válaszként.
+
+**Egy beszélgetésben egyszerre egy válasz:** két párhuzamos üzenet összefésülné az üzeneteit.
+A kérés tranzakciójában vett `pg_try_advisory_xact_lock` véd ellene. A tranzakció a stream
+végéig nyitva marad, és a zár vele együtt szabadul fel, bárhogy ér véget a stream; ha foglalt,
+409.
+
+**Tárolás:** a `messages` tábla csak hozzáfűzhető, mint a naplók: kérdés, minden
+modellforduló, minden eszközhívás bemenettel és eredménnyel, az összefoglalók. A
+`query_log.conversation_id` köti az agent SQL-kísérleteit a beszélgetéshez. Az üzenetek
+tokenjei a napi keretbe számítanak.
+
 ### ADR-005: Fejlesztői eszközök
 
 | Terület | Választás | Miért |
@@ -262,5 +321,6 @@ részleteket ír, a verzió viszont megmondja, melyik szövegre épült a válas
 | 006 | Költségőr: a becsült köztes sorszám a fő mérce, a költség csak hátvéd | Elfogadva (mérés alapján) |
 | 007 | Eval végrehajtási pontossággal, az API folyamatán; few-shot a felhasználói üzenetben | Elfogadva |
 | 008 | Dokumentumok: olvasási szint az SQL-ben, hibrid keresés RRF-fel, csak idézett válasz | Elfogadva |
+| 009 | Agent: saját eszközhívási ciklus korlátokkal, kérdés–válasz memória összefoglalóval, SSE | Elfogadva |
 
 Új döntésnél új sor kerül ide, és egy rövid ADR-szakasz a fenti formában.

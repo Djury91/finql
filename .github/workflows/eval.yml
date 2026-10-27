@@ -2,7 +2,8 @@ name: Eval
 
 # A text-to-SQL minőségének mérése a valódi modellel: csak kézi indításra, mert pénzbe kerül
 # (egy teljes futás 70 kérdés, önjavítással ~70–100 modellhívás). A dokumentumkeresés evalja
-# (20 kérdés, recall@5) csak embeddinget használ, LLM-et nem. A riportok letölthető artifactok,
+# (20 kérdés, recall@5) csak embeddinget használ, LLM-et nem. Az agent evalja 10 vegyes kérdés
+# (adat + dokumentum), kérdésenként néhány modellhívással. A riportok letölthető artifactok,
 # és a futás összefoglalójában is megjelennek. Secretek: ANTHROPIC_API_KEY, VOYAGE_API_KEY
 # (ez utóbbi a few-shothoz és a dokumentumkereséshez kell).
 on:
@@ -23,6 +24,10 @@ on:
         required: false
       retrieval:
         description: "Dokumentumkeresés evalja is (Voyage-kulcs kell)"
+        default: true
+        type: boolean
+      agent:
+        description: "Agent evalja is (vegyes kérdések, a dokumentumokat is betölti)"
         default: true
         type: boolean
 
@@ -82,11 +87,17 @@ jobs:
           --few-shot ${{ inputs.few_shot }}
           --label "${{ inputs.label || github.ref_name }}"
 
-      - name: Dokumentumok és keresési eval
+      - name: Dokumentumok
+        if: inputs.retrieval || inputs.agent
+        run: uv run finql ingest
+
+      - name: Keresési eval
         if: inputs.retrieval
-        run: |
-          uv run finql ingest
-          uv run finql eval retrieval
+        run: uv run finql eval retrieval
+
+      - name: Agent eval
+        if: inputs.agent
+        run: uv run finql eval agent
 
       - name: Riport az összefoglalóba
         if: always()

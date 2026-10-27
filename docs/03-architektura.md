@@ -127,19 +127,60 @@ flowchart LR
 
 ## 4. Agent-folyamat (6. fázis)
 
-Az agent egy eszközhívási ciklus (tool-use loop). Az LLM eldönti, melyik eszközt hívja:
+Az agent egy eszközhívási ciklus (tool-use loop, `agent/service.py`): a modell eldönti, melyik
+eszközt hívja, a kód futtatja őket, és az eredményekkel újra kérdezi a modellt, amíg az nem
+válaszol. A ciklus saját, nem az SDK-é: minden lépést tárolni, költségkeretre ellenőrizni és
+streamelni kell (ADR-009).
+
+```mermaid
+sequenceDiagram
+    participant K as Kliens
+    participant A as Agent (ciklus)
+    participant M as Claude
+    participant E as Eszközök
+    K->>A: POST /chat/conversations/{id}/messages
+    Note over A: függőségek: saját beszélgetés, tokenkeret, zár (409)
+    A-->>K: turn_start
+    A->>M: előzmény + kérdés + eszközök (stream)
+    M-->>A: szövegdarabok, tool_use
+    A-->>K: text …
+    A->>E: query_database / search_documents (a felhasználó jogaival)
+    A-->>K: tool_start, tool_result
+    A->>M: eszközeredmények (stream)
+    M-->>A: végső válasz [n] hivatkozásokkal
+    A-->>K: text …, done (ellenőrzött válasz + idézett források)
+```
 
 | Eszköz | Mit csinál | Jogosultság |
 |---|---|---|
-| `query_database(question)` | A teljes text-to-SQL folyamatot futtatja | A felhasználó kontextusával (RLS) |
-| `search_documents(query, top_k)` | Hibrid keresés a dokumentumokban | Olvasási szint a szerepkörből, SQL-ben szűrve |
-| `describe_schema(view?)` | Visszaadja a nézetek és oszlopok leírását | Csak `analytics` |
-| `get_metric_definition(name)` | Üzleti fogalom definíciója (pl. „aktív ügyfél”) | – |
+| `query_database(question)` | A teljes text-to-SQL folyamatot futtatja (validátor, költségőr, napló) | A felhasználó hatókörével (RLS); az eredményben a `data_scope` mondja meg, milyen körre vonatkozik |
+| `search_documents(query, top_k)` | Hibrid keresés; a találatok számozott `<source>` blokkok | Olvasási szint a szerepkörből, SQL-ben szűrve |
+| `describe_schema(view?)` | A nézetek, vagy egy nézet oszlopainak leírása | Csak `analytics`; adathozzáférés nélkül nem elérhető |
+| `get_metric_definition(name)` | Üzleti fogalom definíciója és számítása (`data/metrics.yaml`) | Mindenkinek |
+
+Az eszközkészlet szerepkörfüggő: az auditor nem kap adateszközt (`query_database`,
+`describe_schema`), mert nem lát banki adatot.
 
 Szabályok:
-- Max. 6 eszközhívás kérdésenként, és tokenkeret felhasználónként.
-- Az eszközök eredménye **adat, nem utasítás**. A dokumentumokban vagy az adatokban talált szöveg nem írhatja felül a rendszerpromptot (indirekt prompt injection elleni védelem).
-- Minden eszközhívás a `messages` táblába kerül (`role = tool`), így visszakövethető.
+- **Korlátok üzenetenként:** legfeljebb 6 eszközhívás (utána a modellnek a meglévő eredményekből
+  kell válaszolnia), a napi tokenkeret minden modellhívás előtt, és egy határidő a teljes
+  üzenetre (120 s).
+- **Eszközönkénti hibakezelés:** hibás bemenet, elutasított SQL, időtúllépés, ismeretlen eszköz:
+  hibaeredmény a modellnek, amire reagálhat; a forduló megy tovább.
+- **Az eszközök eredménye adat, nem utasítás.** A dokumentumok `<source>` címkében érkeznek,
+  amelyet a saját szövegük nem zárhat le; a prompt adatnak nevezi őket. És ha a modell mégis
+  követne egy mérgezett dokumentumot, az eszközök akkor is csak a felhasználó jogaival
+  futnak: nincs eszkaláció (indirekt prompt injection elleni védelem, teszttel).
+- **Hivatkozások:** a dokumentumtalálatok fordulónként 1-től számozódnak, a válasz `[n]`-nel
+  hivatkozik rájuk. A `done` esemény a nem létező számokat elhagyja, és az idézett forrásokat
+  szövegükkel együtt adja.
+- **Memória:** a következő üzenet előzménye a korábbi kérdések és végső válaszok. 8 forduló
+  fölött a régebbieket Haiku összefoglalja, a legutóbbi fele szó szerint marad.
+- **Tárolás:** minden lépés a csak hozzáfűzhető `messages` táblába kerül (kérdés,
+  modellforduló, eszközhívás bemenettel és eredménnyel, összefoglaló). Az agent SQL-kísérletei a
+  `query_log`-ban vannak, `conversation_id`-vel.
+- **SSE-események:** `turn_start`, `text`, `tool_start`, `tool_result`, `done`, `error`. Ami a
+  stream előtt eldől (404, 409, 429), az rendes JSON-hiba.
 
 ## 5. API-felület (tervezett)
 
@@ -153,8 +194,11 @@ Szabályok:
 | `POST` | `/api/v1/documents/search` | Dokumentumkeresés | 5 |
 | `POST` | `/api/v1/documents/answer` | Válasz a dokumentumokból, forrásmegjelöléssel | 5 |
 | `POST` | `/api/v1/chat/conversations` | Új beszélgetés | 6 |
+| `GET` | `/api/v1/chat/conversations` | Saját beszélgetések | 6 |
+| `GET` | `/api/v1/chat/conversations/{id}` | Egy beszélgetés minden lépése (saját; auditor, admin: bárkié) | 6 |
 | `POST` | `/api/v1/chat/conversations/{id}/messages` | Üzenet az agentnek (SSE stream) | 6 |
 | `GET` | `/api/v1/audit/queries` | Lekérdezésnapló (auditor) | 3 |
+| `GET` | `/api/v1/audit/conversations` | Az agent-beszélgetések (auditor) | 6 |
 | `GET` | `/health`, `/ready` | Élő- és készenléti ellenőrzés | 0 |
 
 ## 6. Nem-funkcionális követelmények

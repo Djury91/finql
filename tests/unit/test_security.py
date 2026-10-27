@@ -74,7 +74,7 @@ def test_invalid_tokens_are_rejected(bad_token: str) -> None:
 def test_unsigned_alg_none_token_is_rejected() -> None:
     forged = jwt.encode(
         {"sub": str(USER_ID), "role": "admin", "iss": ISSUER, "iat": 0, "exp": 2**31},
-        key=None,
+        key="",  # no key: PyJWT reads "" as none for alg=none, and its type hints accept it
         algorithm="none",
     )
 

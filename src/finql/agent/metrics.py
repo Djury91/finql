@@ -9,7 +9,9 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-METRICS_FILE = Path("data/metrics.yaml")
+# From the repository root, not the working directory: an MCP client starts `finql mcp` from a
+# directory of its choosing (src/finql/agent/metrics.py → repository root, like core/sql_files).
+METRICS_FILE = Path(__file__).resolve().parents[3] / "data" / "metrics.yaml"
 
 
 class Metric(BaseModel):

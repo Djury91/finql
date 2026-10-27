@@ -277,7 +277,7 @@ nyilvános telepítéshez Railway-fiók kell; a konfiguráció és a lépések k
 
 - [ ] OpenTelemetry-trace (FastAPI → LLM → DB), vagy Langfuse az LLM-hívásokhoz
 - [x] Hash-láncolt `query_log` (`prev_hash`, `row_hash`): a naplóból törölt vagy módosított sor kimutatható (az `answer_log` is; ADR-012)
-- [ ] MCP-szerver: a `query_database` és a `search_documents` eszköz MCP-n keresztül, így Claude Desktopból is használható
+- [x] MCP-szerver: a `query_database` és a `search_documents` eszköz MCP-n keresztül, így Claude Desktopból is használható (`finql mcp`, ADR-013)
 - [ ] Szemantikus válasz-cache (hasonló kérdés + ugyanaz a szerepkör → cache-elt SQL)
 - [ ] Materializált nézetek frissítése ütemezve, adatfrissességi metaadat a válaszban
 - [ ] Django + Django Ninja változat egy moduljáról, összehasonlító jegyzettel
@@ -299,3 +299,22 @@ törlés, átkötés, session-beállítások, új oszlop, horgony, végpont, CLI
   tesztből, ezért utólag teszt is lett rá.
 - A lánc önmagában nem véd a teljes újraírás és a végéről törlés ellen: ehhez külső horgony
   kell. A naplót nem az teszi hitelessé, hogy láncolt, hanem hogy a feje máshol is megvan.
+
+**Állapot – MCP-szerver:** a `finql mcp` stdio-n adja az agent négy eszközét egy MCP-kliensnek,
+a `FINQL_MCP_EMAIL` felhasználó jogaival. 8 integrációs teszt, köztük egy valódi stdio-alfolyamat.
+Élő próba a valódi Claude-dal: egy MCP-kliens stdio-n elindította a szervert, a
+`query_database` a teljes láncon ment át, a napló `mcp-` azonosítóval rögzítette, és a hash-lánc ép
+maradt.
+
+**Tanulságok – MCP-szerver:**
+- Az eszközréteg már az agentnél is a modelltől független volt (Pydantic-bemenet, hibaeredmény,
+  jogosultság a felhasználó rekordjából). Ezért az MCP-szerver vékony réteg lett, nem második
+  megvalósítás.
+- Az idegen modell ugyanúgy nem kap SQL-eszközt, mint a saját agent: a kérdés a teljes láncon
+  megy át. Egy `run_sql` eszköz épp a validátor előtti rétegeket (saját prompt, few-shot)
+  kerülné meg.
+- Az SDK 2.x-es főverzió volt (a `FastMCP` neve `MCPServer` lett). A telepített csomagból
+  ellenőriztük az API-t, nem emlékezetből írtuk; egy régi minta importhibával állt volna meg.
+- Egy MCP-szervert a kliens indít, tetszőleges munkakönyvtárból: a munkakönyvtárhoz relatív
+  fájlútvonal (`data/metrics.yaml`) ott elhasalt volna. A stdio-teszt ezért idegen könyvtárból
+  indít.

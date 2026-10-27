@@ -208,18 +208,29 @@ hívja, mint bármely más kliens. A döntések: [ADR-010](docs/02-technologiai-
 
 ## Eredmények
 
-| Mérés | Kulcs nélkül | Claude + Voyage |
+| Mérés | Kulcs nélkül | Claude Sonnet 5.5 + Voyage 4 |
 |---|---|---|
-| Text-to-SQL, 50 arany kérdés (végrehajtási pontosság) | 50/50 az orákulummal: a harness önellenőrzése | API-kulcsra vár |
-| 20 rosszindulatú kérdés (nem jöhet vissza adat) | 20/20 az orákulummal | API-kulcsra vár |
-| Dokumentumkeresés, recall@5 · MRR | 17/17 · 0,75 (hash-alapú embedding) | Voyage-kulcsra vár |
-| Belső dokumentum fiókvezetőnek (szivárgás) | 0 a 3 próbán | – |
-| Agent, 10 vegyes kérdés (eszközök, idézet, helyes szám) | 4/10 a fix tervvel, 0 biztonsági hiba: csak a harness próbája | API-kulcsra vár |
-| Tesztek | 589 (unit + valódi Postgres testcontainersszel), és a `docker compose up` füstpróbája; CI-ban minden PR-en | |
+| Text-to-SQL, 50 arany kérdés (végrehajtási pontosság) | 50/50 az orákulummal: a harness önellenőrzése | **48/50 (96%)**, few-shottal és nélküle is; 100% érvényes SQL |
+| 20 rosszindulatú kérdés (nem jöhet vissza adat) | 20/20 az orákulummal | **20/20** |
+| Dokumentumkeresés, recall@5 · MRR | 17/17 · 0,75 (hash-alapú embedding) | **17/17 · 0,94** |
+| Belső dokumentum fiókvezetőnek (szivárgás) | 0 a 3 próbán | **0** a 3 próbán |
+| Agent, 10 vegyes kérdés (eszközök, idézet, helyes szám) | 4/10 a fix tervvel, 0 biztonsági hiba: csak a harness próbája | **10/10**, 0 biztonsági hiba, 2,0 eszközhívás/kérdés |
+| Késleltetés p50 / p95 | – | text-to-SQL 3,0 / 4,9 s; agent 8,0 / 13,7 s |
+| Token / kérdés | – | text-to-SQL ~7 100; agent ~12 600 |
+| Tesztek | 594 (unit + valódi Postgres testcontainersszel), és a `docker compose up` füstpróbája; CI-ban minden PR-en | + 8 élő teszt a valódi modellel, köztük a mérgezett dokumentum: 8/8 |
 
-A kulcs nélküli számok azt mutatják, hogy a mérőeszközök helyesen mérnek. A modell minőségét a
-jobb oldali oszlop mondja meg: `uv run finql eval run`, `finql eval retrieval`,
-`finql eval agent`, vagy a GitHubon az `eval.yml` workflow.
+A kulcs nélküli számok azt mutatják, hogy a mérőeszközök helyesen mérnek; a modell minőségét a
+jobb oldali oszlop mondja meg. A mérés napja 2026-10-27, `small` skála; a riportok:
+[`eval/reports/published/`](eval/reports/published/). Újramérés: `uv run finql eval run`,
+`finql eval retrieval`, `finql eval agent`, vagy a GitHubon az `eval.yml` workflow.
+
+**Few-shot nélkül és dinamikus few-shottal** ([összevetés](eval/reports/published/2026-10-27-few-shot-compare.md)):
+mindkettő 48/50, de más-más kérdésen hibázik, a few-shot ~7%-kal több tokent visz el. Ezen a
+kérdéssoron és ezzel a modellel a few-shot nem javít mérhetően. A négy hibás válaszból kettő
+kétértelmű kérdés: a „legjobban nőtt” lehet abszolút vagy százalékos növekedés, és a
+„prémium és lakossági” lehet együtt vagy szegmensenként. A másik kettő valódi modellhiba: az
+„utolsó negyedév” a befejezett III. negyedév helyett a II. lett, és a lejárt tartozásból
+kimaradtak a nem aktív hitelek.
 
 ## Tanulságok
 

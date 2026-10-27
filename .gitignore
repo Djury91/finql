@@ -19,8 +19,9 @@ build/
 .env.*
 !.env.example
 
-# Eval-riportok (a kiemelteket kézzel adjuk hozzá: git add -f)
+# Eval-riportok; a kiemeltek a published/ mappába kerülnek
 eval/reports/*
+!eval/reports/published/
 !eval/reports/.gitkeep
 
 # Helyi adatok, modellek

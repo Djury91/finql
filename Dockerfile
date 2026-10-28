@@ -39,6 +39,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 COPY db ./db
 COPY data ./data
+COPY manual-demo/magyar ./manual-demo/magyar
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/finql-entrypoint
 USER finql
 EXPOSE 8000

@@ -92,7 +92,9 @@ FINQL_PUBLIC_DEMO=true
 4. **Domain:** az `app` → *Settings* → *Networking* → *Generate Domain*. A `PORT` változót a
    Railway adja, az entrypoint azon indítja az uvicornt.
 5. **Ellenőrzés:** `https://<domain>/ready` → `{"status":"ready","database":"ok"}`, és a
-   főoldalon a bejelentkezés.
+   főoldalon a bejelentkezés. Utána a belépőoldalról linkelt demó-forgatókönyvek
+   (`https://<domain>/forgatokonyvek/`, forrásuk a `manual-demo/magyar/`) lépésről lépésre
+   végigvihetők; az elvárt számok minden telepítésben ugyanazok.
 
 ### Nyilvános demó: költség és visszaélés
 

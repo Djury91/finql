@@ -30,6 +30,7 @@ from finql.text_to_sql.router import router as text_to_sql_router
 from finql.text_to_sql.schema_context import CatalogCache
 from finql.web.router import STATIC_DIR
 from finql.web.router import router as web_router
+from finql.web.scenarios import router as scenarios_router
 
 logger = structlog.get_logger(__name__)
 
@@ -124,6 +125,7 @@ def create_app(
     app.include_router(agent_router)
     app.include_router(audit_router)
     app.include_router(web_router)
+    app.include_router(scenarios_router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     if tracing:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor

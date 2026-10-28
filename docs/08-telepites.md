@@ -19,7 +19,7 @@ docker build -t finql .
 | Parancs | Mit csinál |
 |---|---|
 | `serve` (alapértelmezett) | uvicorn a `PORT` porton (alapból 8000), proxy-fejlécekkel |
-| `setup` | `finql db bootstrap` → `alembic upgrade head` → `finql seed --if-empty` → `finql user demo` → `finql ingest` → `finql examples sync` |
+| `setup` | `finql db bootstrap` → `alembic upgrade head` → `finql seed --if-empty` → `finql user demo` (a jelszót a meglévőknél is beállítja) → `finql ingest` → `finql examples sync` |
 | bármi más | a megadott parancs, pl. `finql user create ...` |
 
 A `setup` minden lépése idempotens: a második futás nem tölt be újra adatot, és csak a
@@ -106,6 +106,13 @@ mind az öt demófelhasználóval.
   a jogosultságok és a stream valódi.
 - **Claude-dal:** a jelszót csak annak add meg, akinek szánod, és csökkentsd a keretet
   (`app.users.daily_token_budget`). Az Anthropic-konzolon állíts költési limitet a kulcsra.
+
+**Nyilvános demóból Claude-ra:** a nyilvános jelszót ilyenkor le kell cserélni. A `setup`
+minden telepítéskor lefuttatja a `finql user demo` parancsot, amely a meglévő
+demófelhasználók jelszavát is a `FINQL_DEMO_PASSWORD`-re állítja. Elég tehát egy új értéket
+megadni (a `FINQL_PUBLIC_DEMO` törlésével és a kulccsal együtt), és újratelepíteni: a régi
+jelszó onnantól nem működik. A korábban kiadott tokenek a lejáratukig (alapból 30 perc) még
+érvényesek. Más felhasználóhoz a parancs nem nyúl.
 
 **`FINQL_PUBLIC_DEMO=true`:** a belépőoldal szerepkörönként egy gombot mutat, amely egy
 kattintással belép, és kiírja a közös jelszót az API-hoz. Kulcs nélkül a jelszó nem véd

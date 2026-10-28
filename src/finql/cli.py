@@ -139,18 +139,17 @@ def user_create(
 
 @user_app.command("demo")
 def user_demo() -> None:
-    """Demófelhasználók szerepkörönként (idempotens), jelszavuk a FINQL_DEMO_PASSWORD."""
-    from finql.auth.admin import DEMO_USERS, create_users
+    """Demófelhasználók szerepkörönként (idempotens), jelszavuk a FINQL_DEMO_PASSWORD. A
+    meglévőkét is erre állítja: a változó cseréje után a régi jelszó nem működik."""
+    from finql.auth.admin import DEMO_USERS, sync_demo_users
 
     password = get_settings().demo_password
     if password is None:
         typer.echo("Hiányzik a FINQL_DEMO_PASSWORD (lásd .env.example).", err=True)
         raise typer.Exit(1)
-    created = asyncio.run(
-        create_users(_migration_url(), list(DEMO_USERS), password.get_secret_value())
-    )
+    statuses = asyncio.run(sync_demo_users(_migration_url(), password.get_secret_value()))
     for user in DEMO_USERS:
-        status = "létrehozva" if user.email in created else "már létezett"
+        status = statuses.get(user.email, "nem található")
         branch = f" ({user.branch_code})" if user.branch_code else ""
         typer.echo(f"  {user.email:<32} {user.role.value}{branch}: {status}")
 

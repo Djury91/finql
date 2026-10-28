@@ -11,7 +11,7 @@ import pytest
 from alembic import command
 from fastapi.testclient import TestClient
 
-from finql.auth.admin import DEMO_USERS, NewUser, create_users
+from finql.auth.admin import DEMO_USERS, NewUser, create_users, sync_demo_users
 from finql.auth.models import UserRole
 from finql.core.db import async_url
 from finql.core.security import create_access_token
@@ -180,3 +180,27 @@ def test_seed_reset_keeps_users_and_refuses_to_drop_their_branch(
 def test_models_and_migrations_are_in_sync(migrated_db: DbUrls) -> None:
     # Fails if a model changed without a migration (autogenerate would find a difference).
     command.check(alembic_config(migrated_db.migrator))
+
+
+def test_changing_the_demo_password_retires_the_old_one(
+    client: TestClient, seeded_db: DbUrls
+) -> None:
+    # A public demo shows its password; before a real API key goes in, it must stop working.
+    other = "kulso@minta-bank.example"
+    asyncio.run(
+        create_users(seeded_db.migrator, [NewUser(other, "Külső", UserRole.ANALYST)], PASSWORD)
+    )
+    try:
+        status = asyncio.run(sync_demo_users(seeded_db.migrator, "Uj-interju-jelszo-1"))
+
+        assert set(status.values()) == {"jelszó frissítve"}
+        assert len(status) == len(DEMO_USERS)
+        old = client.post("/auth/token", data={"username": PECS_MANAGER, "password": PASSWORD})
+        assert old.status_code == 401
+        assert login(client, PECS_MANAGER, "Uj-interju-jelszo-1")
+        assert login(client, other)  # not a demo user: untouched
+
+        again = asyncio.run(sync_demo_users(seeded_db.migrator, "Uj-interju-jelszo-1"))
+        assert set(again.values()) == {"változatlan"}
+    finally:
+        asyncio.run(sync_demo_users(seeded_db.migrator, PASSWORD))

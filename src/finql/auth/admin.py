@@ -10,6 +10,7 @@ from finql.auth import service
 from finql.auth.models import User, UserRole
 from finql.core.db import async_url, create_sessionmaker
 from finql.core.errors import AppError
+from finql.core.security import hash_password, verify_password
 
 
 @dataclass(frozen=True)
@@ -69,3 +70,32 @@ async def create_users(database_url: str, users: list[NewUser], password: str) -
     finally:
         await engine.dispose()
     return created
+
+
+async def sync_demo_users(database_url: str, password: str) -> dict[str, str]:
+    """The demo users with this password: the missing ones are created, the existing ones get
+    the password if theirs differs. `setup` runs it at every deploy, so changing
+    FINQL_DEMO_PASSWORD changes the password too, and an old, public one stops working (e.g.
+    before switching a public demo to a real API key). Other users are never touched.
+    Returns the status per e-mail address."""
+    created = set(await create_users(database_url, list(DEMO_USERS), password))
+    status: dict[str, str] = {}
+    engine = create_async_engine(async_url(database_url))
+    try:
+        async with create_sessionmaker(engine)() as session, session.begin():
+            for demo in DEMO_USERS:
+                email = service.normalize_email(demo.email)
+                if email in created:
+                    status[email] = "létrehozva"
+                    continue
+                user = await session.scalar(select(User).where(User.email == email))
+                if user is None:  # deleted since create_users: nothing to sync
+                    continue
+                if verify_password(user.password_hash, password):
+                    status[email] = "változatlan"
+                else:
+                    user.password_hash = hash_password(password)
+                    status[email] = "jelszó frissítve"
+    finally:
+        await engine.dispose()
+    return status

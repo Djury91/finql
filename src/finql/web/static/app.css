@@ -224,6 +224,26 @@ pre {
   font-size: 0.85rem;
 }
 
+.demo-users.demo-logins {
+  list-style: none;
+  padding-left: 0;
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.demo-login {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  text-align: left;
+}
+
+.demo-login:hover {
+  border-color: var(--accent);
+}
+
 /* --- Chat layout --- */
 
 .chat {

@@ -83,6 +83,7 @@ FINQL_JWT_SECRET=<python -c "import secrets; print(secrets.token_urlsafe(48))">
 FINQL_DEMO_PASSWORD=<a demófelhasználók jelszava>
 FINQL_LLM_PROVIDER=fake
 FINQL_EMBEDDING_PROVIDER=hashing
+FINQL_PUBLIC_DEMO=true
 ```
 
    Nyomkövetés (opcionális, ADR-014): `FINQL_OTEL_ENDPOINT` egy OTLP/HTTP-gyűjtő címe (pl. egy
@@ -103,6 +104,17 @@ mind az öt demófelhasználóval.
   a jogosultságok és a stream valódi.
 - **Claude-dal:** a jelszót csak annak add meg, akinek szánod, és csökkentsd a keretet
   (`app.users.daily_token_budget`). Az Anthropic-konzolon állíts költési limitet a kulcsra.
+
+**`FINQL_PUBLIC_DEMO=true`:** a belépőoldal szerepkörönként egy gombot mutat, amely egy
+kattintással belép, és kiírja a közös jelszót az API-hoz. Kulcs nélkül a jelszó nem véd
+semmit (az adat kitalált, nincs mit elkölteni), ezért nem kezeljük titokként; ami a rendszert
+védi, az a Row-Level Security és a validált SQL. A beállítás csak `FINQL_LLM_PROVIDER=fake` és
+`FINQL_EMBEDDING_PROVIDER=hashing` mellett indul el: fizetős kulccsal az alkalmazás és a `setup`
+is hibával áll meg, így nyilvános jelszó mellé nem kerülhet költség.
+
+Egy ismert korlát: a beszélgetések felhasználóhoz tartoznak, így az ugyanazzal a
+demófelhasználóval belépők látják egymás korábbi kérdéseit. A `messages` napló szándékosan csak
+hozzáfűzhető, ezért ezt törléssel nem oldjuk meg.
 
 ### Más platformon
 

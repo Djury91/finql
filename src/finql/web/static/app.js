@@ -462,20 +462,21 @@ function showLogin(message) {
   error.hidden = !message;
 }
 
-async function login(event) {
-  event.preventDefault();
-  const form = new FormData(event.target);
+async function loginWith(username, password) {
   try {
-    const response = await api("/auth/token", {
-      method: "POST",
-      form: { username: form.get("username"), password: form.get("password") },
-    });
+    const response = await api("/auth/token", { method: "POST", form: { username, password } });
     saveToken((await response.json()).access_token);
-    event.target.reset();
+    $("login-form").reset();
     await start();
   } catch (error) {
     showLogin(error.message);
   }
+}
+
+function login(event) {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  return loginWith(form.get("username"), form.get("password"));
 }
 
 // --- Conversations -------------------------------------------------------------------------
@@ -604,6 +605,10 @@ function renderConfig(config) {
     ),
   );
   show("demo-users", config.demo_users.length > 0);
+  if (config.demo_password) {
+    renderPublicDemoUsers(config.demo_users, config.demo_password);
+    return;
+  }
   $("demo-user-list").replaceChildren(
     ...config.demo_users.map((u) =>
       el(
@@ -628,6 +633,40 @@ function renderConfig(config) {
       ),
     ),
   );
+}
+
+// Public demo (FINQL_PUBLIC_DEMO): the password is no secret, so one click logs in. The roles
+// side by side show the row-level security: the same question, different rows.
+function renderPublicDemoUsers(users, password) {
+  $("demo-users-hint").replaceChildren(
+    "Nyilvános demó: lépj be egy kattintással. A fiókvezető csak a saját fiókja adatait látja, " +
+      "az elemző az egész bankét. Szerepkört a kijelentkezéssel válthatsz.",
+  );
+  const order = ["branch_manager", "analyst", "auditor", "admin"];
+  const sorted = [...users].sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
+  $("demo-user-list").classList.add("demo-logins");
+  $("demo-user-list").replaceChildren(
+    ...sorted.map((u) =>
+      el(
+        "li",
+        {},
+        el(
+          "button",
+          { type: "button", class: "demo-login", onclick: () => loginWith(u.email, password) },
+          el("span", { text: u.name }),
+          el("span", {
+            class: "muted",
+            text: `${ROLE_LABELS[u.role] ?? u.role}${u.branch ? ` (${u.branch})` : ""}`,
+          }),
+        ),
+      ),
+    ),
+  );
+  $("demo-password").replaceChildren(
+    "Az API-hoz (/docs) ugyanezek a felhasználók, e-mail-címmel, a közös jelszó: ",
+    el("code", { text: password }),
+  );
+  show("demo-password", true);
 }
 
 async function start() {

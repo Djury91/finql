@@ -1,7 +1,7 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -27,8 +27,11 @@ class Settings(BaseSettings):
     jwt_secret: SecretStr = Field(min_length=32)
     jwt_issuer: str = "finql"
     access_token_ttl_minutes: int = Field(default=30, gt=0)
-    # Password of the demo users (`finql user demo`); never used in production.
+    # Password of the demo users (`finql user demo`).
     demo_password: SecretStr | None = None
+    # Public demo: the login page shows the demo password and logs in with one click. The
+    # password is no secret then, so only allowed without paid APIs (see the validator).
+    public_demo: bool = False
 
     # --- LLM (text-to-SQL) ---
     # "fake": deterministic answers to the example questions, no API key, no cost (demo, tests).
@@ -93,6 +96,18 @@ class Settings(BaseSettings):
     # The MCP client (e.g. Claude Desktop) passes them in its server configuration.
     mcp_email: str | None = None
     mcp_password: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def _public_demo_costs_nothing(self) -> Self:
+        if self.public_demo:
+            if self.demo_password is None:
+                raise ValueError("public_demo needs demo_password: there is nothing to show")
+            if self.llm_provider != "fake" or self.embedding_provider != "hashing":
+                raise ValueError(
+                    "public_demo needs llm_provider=fake and embedding_provider=hashing: "
+                    "with a public password anyone could spend on the API keys"
+                )
+        return self
 
     @property
     def json_logs(self) -> bool:

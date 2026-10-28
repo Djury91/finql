@@ -3,7 +3,9 @@
 import re
 from html.parser import HTMLParser
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from finql.main import create_app
 from finql.web.router import STATIC_DIR
@@ -105,6 +107,38 @@ def test_config_in_demo_mode_lists_the_demo_users_but_not_their_password() -> No
         "branch": "PEC01",
     }
     assert "Demo-jelszo-2026" not in response.text
+
+
+PUBLIC_DEMO = {
+    "public_demo": True,
+    "demo_password": "Demo-jelszo-2026",
+    "llm_provider": "fake",
+    "embedding_provider": "hashing",
+}
+
+
+def test_a_public_demo_shows_the_password_for_one_click_login() -> None:
+    with client(**PUBLIC_DEMO) as c:
+        config = c.get("/web/config").json()
+
+    assert config["demo_password"] == "Demo-jelszo-2026"
+    assert config["demo_users"]
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"llm_provider": "anthropic"}, "llm_provider=fake"),
+        ({"embedding_provider": "voyage"}, "embedding_provider=hashing"),
+        ({"demo_password": None}, "needs demo_password"),
+    ],
+)
+def test_a_public_demo_refuses_to_start_with_paid_apis_or_without_a_password(
+    override: dict[str, object], reason: str
+) -> None:
+    # A public password with a real API key: anyone could spend on it.
+    with pytest.raises(ValidationError, match=reason):
+        make_settings(UNREACHABLE_DB, **{**PUBLIC_DEMO, **override})
 
 
 def test_the_ui_routes_are_not_in_the_api_schema() -> None:

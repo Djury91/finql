@@ -57,6 +57,8 @@ class DemoUser(BaseModel):
 class WebConfig(BaseModel):
     demo_mode: bool  # no language model: the keyless stand-ins answer
     demo_users: list[DemoUser]  # login hints; only when the demo users exist (FINQL_DEMO_PASSWORD)
+    # Public demo only (FINQL_PUBLIC_DEMO): one-click login. No secret there, nothing to spend.
+    demo_password: str | None = None
     examples: list[str]
 
 
@@ -67,8 +69,8 @@ async def index() -> FileResponse:
 
 @router.get("/web/config")
 async def config(settings: AppSettings) -> WebConfig:
-    """What the login page and the chat need before login. Nothing secret: the demo passwords
-    are not here, only the addresses."""
+    """What the login page and the chat need before login. Nothing secret: the demo password is
+    here only in a public demo, which the settings allow without paid APIs only."""
     demo_users = (
         [
             DemoUser(email=u.email, name=u.full_name, role=u.role.value, branch=u.branch_code)
@@ -80,5 +82,10 @@ async def config(settings: AppSettings) -> WebConfig:
     return WebConfig(
         demo_mode=settings.llm_provider == "fake",
         demo_users=demo_users,
+        demo_password=(
+            settings.demo_password.get_secret_value()
+            if settings.public_demo and settings.demo_password is not None
+            else None
+        ),
         examples=list(EXAMPLE_QUESTIONS),
     )

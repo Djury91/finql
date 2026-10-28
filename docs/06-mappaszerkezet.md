@@ -15,7 +15,7 @@ szükség esetén egy modul (pl. `rag`) külön szolgáltatássá emelhető.
 
 ```text
 finql/
-├── README.md
+├── README.md                      # angolul; README.hu.md: magyarul
 ├── LICENSE
 ├── pyproject.toml                 # függőségek, ruff/mypy/pytest/poe beállítások
 ├── uv.lock
@@ -40,6 +40,9 @@ finql/
 │   └── workflows/
 │       ├── ci.yml                 # lint → formázás → mypy → pytest (testcontainers)
 │       └── eval.yml               # kézi vagy éjszakai eval valódi LLM-mel (secret)
+│
+├── manual-demo/                   # kézi demó-forgatókönyvek felhasználónként: magyar/, angol/
+│                                  #   (a magyart az app is megjeleníti: /forgatokonyvek)
 │
 ├── docs/                          # ez a dokumentáció
 │   ├── 01-projekt-terv.md … 08-telepites.md
@@ -168,6 +171,7 @@ finql/
 │   │
 │   ├── web/                       # webes felület (ADR-010)
 │   │   ├── router.py              # GET / (CSP-fejlécekkel), GET /web/config
+│   │   ├── scenarios.py           # GET /forgatokonyvek/: a manual-demo/magyar oldalai (Markdown → HTML)
 │   │   └── static/                # index.html, app.js (SSE-olvasó, csak szövegcsomópontok), app.css
 │   │
 │   └── pipelines/                 # adat-pipeline-ok, a CLI-ből indítva

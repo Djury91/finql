@@ -270,6 +270,16 @@ válasz, dokumentum vagy adatsor ([ADR-014](docs/02-technologiai-dontesek.md)).
 | `uv run poe db-down` | Postgres leállítása (az adat megmarad) |
 | `uv run pre-commit install` | Git-hookok bekapcsolása |
 
+### Munka coding agenttel
+
+A FinQL Claude Code-dal készült. A [`CLAUDE.md`](CLAUDE.md) adja meg egy agentnek a repó
+szabályait: a biztonsági rétegeket, amelyeket nem gyengíthet, a hibrid adatbázist, a parancsokat,
+és azt, hogy mi kerül pénzbe. A [`.claude/skills/`](.claude/skills/) három skillje azokra a
+változtatásokra szól, ahol a hiba csendes lenne: `db-change` (séma, nézetek, RLS, jogok),
+`sql-guard-change` (validátor és költségőr) és `eval-check` (annak bizonyítása, hogy egy prompt-
+vagy modellváltás tényleg javított). A [`.claude/settings.json`](.claude/settings.json) az
+ingyenes ellenőrzéseket kérdés nélkül engedi, a fizetős evalt és az élő teszteket kérdéssel.
+
 ## Eredmények
 
 | Mérés | Kulcs nélkül | Claude Sonnet 5.5 + Voyage 4 |

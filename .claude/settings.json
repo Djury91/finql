@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run poe check)",
+      "Bash(uv run poe lint)",
+      "Bash(uv run poe format)",
+      "Bash(uv run poe typecheck)",
+      "Bash(uv run poe test)",
+      "Bash(uv run poe test-unit)",
+      "Bash(uv run poe eval-oracle)",
+      "Bash(uv run poe eval-retrieval)",
+      "Bash(uv run pytest *)",
+      "Bash(uv run ruff *)",
+      "Bash(uv run mypy *)",
+      "Bash(uv run alembic current)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "ask": [
+      "Bash(uv run poe eval)",
+      "Bash(uv run poe eval-agent)",
+      "Bash(uv run poe test-llm)",
+      "Bash(uv run finql eval run *)",
+      "Bash(uv run finql eval agent *)",
+      "Bash(uv run pytest -m llm *)",
+      "Bash(git push *)"
+    ],
+    "deny": [
+      "Read(./.env)"
+    ]
+  }
+}

@@ -275,6 +275,16 @@ document or data row ([ADR-014](docs/02-technologiai-dontesek.md)).
 | `uv run poe db-down` | Stop Postgres (the data is kept) |
 | `uv run pre-commit install` | Enable the Git hooks |
 
+### Working with a coding agent
+
+FinQL was built with Claude Code. [`CLAUDE.md`](CLAUDE.md) gives an agent the rules of this
+repository: the security layers it must not weaken, the hybrid database, the commands, and what
+costs money. Three skills in [`.claude/skills/`](.claude/skills/) cover the changes where a
+mistake would be silent: `db-change` (schema, views, RLS, grants), `sql-guard-change` (validator
+and cost guard) and `eval-check` (proving that a prompt or model change helped).
+[`.claude/settings.json`](.claude/settings.json) lets the free checks run without asking, and
+asks before every paid eval or live test.
+
 ## Results
 
 | Metric | Without a key | Claude Sonnet 5.5 + Voyage 4 |

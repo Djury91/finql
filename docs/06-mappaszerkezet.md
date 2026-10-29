@@ -29,6 +29,11 @@ finql/
 ├── docker-compose.yml             # db (pgvector/pgvector:pg18) → setup → app; jaeger (observability profil)
 ├── railway.json                   # PaaS: build a Dockerfile-ból, pre-deploy setup, /ready
 ├── alembic.ini
+├── CLAUDE.md                      # útmutató coding agenteknek: szabályok, parancsok, tilalmak
+├── .claude/
+│   ├── settings.json              # engedélyek: ingyenes ellenőrzés kérdés nélkül, fizetős futás kérdéssel
+│   └── skills/                    # eljárások a kockázatos változtatásokhoz:
+│                                  #   db-change, sql-guard-change, eval-check
 │
 ├── docker/
 │   └── entrypoint.sh              # serve | setup | bármi más; a Compose-ban a DB-hoszt cseréje
